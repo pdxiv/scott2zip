@@ -1,0 +1,298 @@
+ 0 
+ 9 
+ 15 
+ 33 
+ 5 
+ 99 
+ 1 
+ 0 
+ 3 
+ 32767 
+ 11 
+ 0 
+ 1507 
+ 64 
+ 62 
+ 0 
+ 0 
+ 0 
+ 150 
+ 0 
+ 50 
+ 64 
+ 62 
+ 0 
+ 0 
+ 0 
+ 300 
+ 0 
+ 3158 
+ 84 
+ 60 
+ 0 
+ 0 
+ 0 
+ 450 
+ 0 
+ 3607 
+ 84 
+ 22 
+ 100 
+ 0 
+ 0 
+ 8164 
+ 0 
+ 2859 
+ 122 
+ 40 
+ 100 
+ 0 
+ 0 
+ 750 
+ 0 
+ 2859 
+ 142 
+ 40 
+ 100 
+ 0 
+ 0 
+ 900 
+ 0 
+ 2860 
+ 42 
+ 0 
+ 0 
+ 0 
+ 0 
+ 1050 
+ 0 
+ 2860 
+ 82 
+ 120 
+ 140 
+ 0 
+ 0 
+ 1200 
+ 0 
+ 100 
+ 64 
+ 62 
+ 42 
+ 40 
+ 0 
+ 1423 
+ 0 
+ 0 
+ 40 
+ 60 
+ 80 
+ 0 
+ 20 
+ 8322 
+ 10864 
+ 4059 
+ 122 
+ 120 
+ 140 
+ 40 
+ 0 
+ 10853 
+ 9600 
+ 2861 
+ 103 
+ 120 
+ 140 
+ 40 
+ 40 
+ 1500 
+ 0 
+ 4511 
+ 103 
+ 120 
+ 140 
+ 40 
+ 40 
+ 1713 
+ 0 
+ 0 
+ 0 
+ 0 
+ 0 
+ 0 
+ 0 
+ 0 
+ 0 
+ 4800 
+ 0 
+ 0 
+ 0 
+ 0 
+ 0 
+ 9900 
+ 0 
+ 4950 
+ 0 
+ 0 
+ 0 
+ 0 
+ 0 
+ 9600 
+ 0 
+"AUT"
+"ANY"
+"GO"
+"NORTH"
+""
+"SOUTH"
+""
+"EAST"
+""
+"WEST"
+""
+"UP"
+""
+"DOWN"
+""
+"LAD"
+""
+"SIG"
+""
+"TRE"
+"GET"
+"GOB"
+""
+"TSH"
+""
+"*SHI"
+""
+"*T-S"
+""
+""
+""
+""
+""
+""
+""
+""
+"DRO"
+""
+"EXA"
+""
+"*X"
+""
+"REA"
+""
+"*EXA"
+""
+"*X"
+""
+"CLIMB"
+""
+"*GO"
+""
+"*USE"
+""
+"SHA"
+""
+"*HIT"
+""
+"*KIC"
+""
+"WEA"
+""
+"*USE"
+""
+"INV"
+""
+"LOO"
+""
+ 0 
+ 0 
+ 0 
+ 0 
+ 0 
+ 0 
+""
+ 0 
+ 0 
+ 2 
+ 0 
+ 0 
+ 0 
+"*I'm outside the gates of the adventurers' guild"
+ 3 
+ 0 
+ 4 
+ 1 
+ 0 
+ 0 
+"meadow"
+ 0 
+ 2 
+ 0 
+ 0 
+ 0 
+ 0 
+"damp cave"
+ 0 
+ 0 
+ 0 
+ 2 
+ 0 
+ 0 
+"forest. There is a tree house at the top of the tree canopies"
+ 0 
+ 0 
+ 0 
+ 0 
+ 0 
+ 4 
+"*I'm inside a tree house"
+""
+"I start to reach for the ladder when the goblin starts to growl and bares its teeth. I can't remember if I had my tetanus shots recently so I'm backing off slowly."
+"I hear hungrily growling noises."
+"Sign simply says:
+`Treasures above`"
+"I give the tree a thorough thrashing until all the apples on its branches have fallen to the ground."
+"It's an apple tree with its branches heavy with red and juicy-looking apples."
+"This tree looks like it has seen better days."
+"It's a dirty, sad looking little goblin."
+"It's a dirty little goblin, snoring loudly, with a smile on its face."
+"The goblin quickly throws itself at the apples, devouring every piece in sight, in a flurry of teeth, saliva and random bits of flying vegetable matter.
+Eww! I think i got some in my hair!
+After the meal, the goblin blinks sleepily a couple of times and sinks down with a snore in the corner of the cave."
+"The tshirt has a print on it saying:
+`Winners don't wear t-shirts. not.`"
+"As I start to put on the t-shirt the smell of mold and dust fills my nose.
+I'm going to need a long shower after this.
+
+After finding the treasure (well, treasure shirt) my mission is complete and I will no doubt proceed to live happily ever after, without putting on silly dirty garments for the sake of some stupid trial ever again."
+"Ladder" 3 
+"Ladder/LAD/" 0 
+"Pile of apples/APP/" 0 
+"Goblin" 3 
+"Sleeping goblin" 0 
+"Tshirt/TSH/" 5 
+"Apple tree" 2 
+"Abused tree" 0 
+"Sign" 4 
+"Dummy light source" 0 
+"GET LADDER FAIL"
+"GOBLIN STOMACH GROWLING"
+"READ SIGN IN FOREST"
+"CLIMB LADDER TO TREEHOUSE"
+"EXAMINE TREE 1"
+"EXAMINE TREE 2"
+"EXAMINE GOBLIN 1"
+"EXAMINE GOBLIN 2"
+"GOBLIN EAT APPLES"
+"GOBLIN EAT APPLES CONTINUED"
+"SHAKE TREE"
+"EXAMINE T-SHIRT"
+"WEAR TSHIRT"
+"-------- GENERAL ACTIONS BELOW"
+"INVENTORY"
+"LOOK"
+ 0 
+ 0 
+ 0 

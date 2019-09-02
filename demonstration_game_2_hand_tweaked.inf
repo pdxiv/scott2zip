@@ -1,0 +1,1222 @@
+global format = "TRS-80";
+global location = room_1;
+global dead_room = room_5;
+global treasure_room = 0;
+global no_treasures = 0;
+global max_carried = 99;
+global abbreviation = 3;
+global light_left = 32767;
+Constant scott2zip_version "1.00";
+
+!
+! Here starts the code common for all adventures.
+!
+Constant buf_length 80;
+array raw_buffer string buf_length;	! Raw input buffer
+global buffer string buf_length;	! Text buffer
+global parse string 32;			! List of parsed addresses of words
+array verb_str -> buf_length;		! The latest verb entered -- only
+					! used for diagnostic when unknown
+array noun_str -> buf_length;		! The latest noun entered
+global noun;				! Current noun
+global width = 0;			! Screen width
+global height = 0;			! Screen height
+
+!
+! Variables used by various translated actions.
+!
+global auto_inventory = 1;		! Show inventory automatically
+global direction;			! Direction to move in
+global timer;				! Countdown timer
+array room_reg --> 6;			! Room registers
+array timer_reg --> 8;			! Timer registers
+global script_flag = 0;			! Non-zero if transcript is active
+
+!
+! For displaying the upper window.
+!
+global separator -> 256;		! For separator line (<------->)
+constant max_rows 25;			! Max number of lines we are prepared
+					! to handle
+global old_has_light = -1;		! Old value of light
+global old_location = 0;		! Value of location last time
+					!   RefreshStatusWindow was called
+array old_sorted -> 260;		! Old sorted items for current location
+array new_sorted -> 260;		! New sorted items
+array big_buffer -> 2048;		! Buffer used to print text before
+					! outputting it to the status window
+global print_buffer;			! Pointer to the part of big_buffer
+					! we are using now
+array string_ptr --> max_rows;		! Pointer to strings occupying one
+					! screen line each (word 0 is not used)
+array string_len --> max_rows;		! Length of above strings.
+global last_row = 0;			! The last screen row (1 numbering)
+					! and last index used in string_ptr
+					! and string_len
+global window_size = 0;			! The size of the upper window
+
+! The following attributes are used for the object 'flags'.
+attribute f0; attribute f1; attribute f2; attribute f3;
+attribute f4; attribute f5; attribute f6; attribute f7;
+attribute f8; attribute f9; attribute f10; attribute f11;
+attribute f12; attribute f13; attribute f14; attribute f15;
+attribute f16; attribute f17; attribute f18; attribute f19;
+attribute f20; attribute f21; attribute f22; attribute f23;
+attribute f24; attribute f25; attribute f26; attribute f27;
+attribute f28; attribute f29; attribute f30; attribute f31;
+
+attribute treasure;			! Mark all treasure objects.
+
+property n_to; property s_to;
+property e_to; property w_to;
+property u_to; property d_to;
+property description;
+property initial_location;
+property invent_order;
+
+array dir_prop -> n_to s_to e_to w_to u_to d_to;
+array dir_name --> "NORTH" "SOUTH" "EAST" "WEST" "UP" "DOWN";
+array short_dir -> 'n' 's' 'e' 'w' 'u' 'd';
+
+global DontUnderstand = "I don't understand your command. ";
+global CantDoYet = "I can't do that yet. ";
+
+Object player "player";
+
+[ Main;
+  Init();
+  PlayTheGame();
+  quit;
+];
+
+[ Init
+	i;
+  	width = 0->33;
+  	height = 0->32;
+	separator->0 = width-1;
+	separator->1 = '<';
+	for (i = 2: i < width-2: i++) {
+		separator->i = '-';
+	}
+	separator->i = '>';
+];
+
+[ PlayTheGame    i;
+.menu_again;
+	@erase_window -1;
+
+	! Output the title for the adventure centered.
+	@output_stream 3 big_buffer;
+	Title();
+	@output_stream -3;
+  	style reverse;
+	i = (width-big_buffer-->0)/2;
+	spaces(i);
+	Title();
+	spaces(width-i-big_buffer-->0);
+  	style roman;
+
+	! Print a centered menu.
+	for (i = 0: i < (height-10)/2: i++) {
+		new_line;
+	}
+	MenuItem("S", "Start the game");
+	MenuItem("R", "Restore a saved game");
+	MenuItem("C", "Show credits");
+	MenuItem("I", "Info about playing");
+	MenuItem("Q", "Quit");
+
+	! Get a character and perform the function.
+	@read_char 1 i;
+	@erase_window -1;
+	switch (i) {
+	's', 'S': parser();
+	'r', 'R': RestoreAux();
+	'c', 'C': Credits();
+	'i', 'I': Info();
+	'q', 'Q': quit;
+	}
+	jump menu_again;
+];
+
+[ MenuItem key desc;
+	spaces((width-22)/2);
+	style bold;
+	print (string) key;
+	style roman;
+	print "  ", (string) desc;
+	new_line;
+	new_line;
+];
+
+[ RestoreAux   c;
+	restore RMaybe;
+	.RMaybe;
+	print "Restore failed^Press RETURN to continue...";
+	@read_char 1 c;
+];
+
+[ Credits    c;
+  style bold; print "Credits"; style roman;
+  print "^^'";
+  Title();
+  print "' was translated to Inform by Scott2Zip, version ";
+  print (string) scott2zip_version, ", and subsequently compiled \
+ 	with Inform v";
+  inversion;
+  print ".^^";
+  print "The original version was probably written by either Scott Adams \
+	or Brian Howarth, in the the ~Scott Adams format~. \
+	If written by Scott Adams, it is still under copyright and this \
+	translated version can only be used by the legal owner of the \
+	original adventure; it must not be given away or distributed \
+	on the Net.^^";
+  print "For help to understand the TRS-80 format, \
+        thanks to Paul David Doherty, \
+ 	who wrote the decompiler ScottDec, and to \
+	Alan Cox, who wrote the game driver ScottFree.^^";
+  print "Thanks to Graham Nelson, for creating Inform, and for \
+	 documenting the Z-machine.^^";
+  print "Thanks to Graham Nelson and Gareth Rees, for suggesting how \
+	word-wrapping in the upper window could be done.^^";
+  print "[Please press SPACE.]^";
+  @read_char 1 c;
+];
+
+[ Info c;
+  style bold; print "Commands"; style roman;
+  print "^^Commands consist of sentences with one or two words.
+	The following commands are always understood: HELP, QUIT, \
+	SAVE GAME, SCORE, and INVENTORY.^^";
+  print "In this particular adventure, you may abbreviate any word by typing \
+         its first ", abbreviation, " letters, \
+         and directions by typing one letter.^^";
+  print "There are some meta-commands available.^^~$script~ turns on a game \
+        transcript, ~$unscript~ or ~$noscript~ turns off the transcript. ";
+#ifdef DEBUG;
+  print "^^In addition, for debugging the following commands can be useful: \
+	~$record~ turns on a recording of all commands typed, \
+  	and ~$norecord~ turns it off. ~$replay~ plays back a command \
+	recording. ~$random~ will make the random-number generator \
+	predictable; a number may be given to select a certain sequence \
+	of random numbers.";
+#endif;
+  print "^^";
+  print "[Please press SPACE.]^";
+  @read_char 1 c;
+];
+
+[ YesOrNoChar    c;
+	@read_char 1 c;
+	if (c == 'y' || c == 'Y')
+		rtrue;
+	rfalse;
+];
+
+[ parser
+  	dict verb_word i syntax action num_words c meta;
+  dict = 0-->4;				! Pick up pointer to main dictionary.
+  @output_stream 3 big_buffer;
+  RefreshStatusWindow();
+  @output_stream -3;
+  new_line;
+
+  !
+  ! The main parse loop:
+  !
+  ! 1. Execute the each-turn actions.
+  ! 2. Refresh the status window.
+  ! 3. Print a prompt, read a command and analyse it.
+  ! 4. If the input was error-free, execute the routine for
+  !    entered verb.
+  !
+  while (1 == 1) {
+	.next_turn;
+  	@output_stream 3 big_buffer;
+	EachTurn();
+	flush_buffer();
+
+	!
+	! Jump to here to skip each-turn actions (for meta-verbs).
+	!
+	.again;
+  	@output_stream 3 big_buffer;
+	RefreshStatusWindow();
+	@output_stream -3;
+
+	!
+	! Print the prompt and read a command.
+	! 
+	.prompt;
+	print "WHAT SHALL I DO? ";
+	num_words = ReadCommand();
+	if (num_words == 0) jump prompt;
+	parse->1 = 0;
+	@tokenise buffer parse dict 0;
+        if (parse-->1 == 0) {			! Check if in dictionary
+		! If not in dictionary, might be a direction ('n', 's', etc).
+		if (parse->4 == 1) {		! Must be one letter.
+			c = buffer->(parse->5);
+	    		for (i = 0: i < 6: i++) {
+				if (c == short_dir->i) {
+					@output_stream 3 big_buffer;
+					MovePlayer(dir_prop->i);
+					flush_buffer();
+					jump next_turn;
+				}
+			}
+		}
+		VerbComplain();
+		jump prompt;
+	}
+
+	! Okay, the first word was found in the dictionary, but
+	! must still check if it is a verb.
+	verb_word = parse-->1;
+	if (verb_word->#dict_par1 & 1 == 0) {	! Not a verb.
+		VerbComplain();
+		jump prompt;
+	}
+        meta = (verb_word->#dict_par1) & 2;	! Save the meta bit for later.
+
+! Get the noun, if any.
+	if (num_words < 2) {
+		noun = 0;
+	} else {
+		noun = parse-->3;
+		if ((noun == 0 || (noun->#dict_par1 & $80) == 0) &&
+		    meta == 0) {
+			! Error if noun not in dictionary or noun bit not set,
+			! but if meta-command we accept it anyway.
+			print "I don't know what a ~";
+			PrintNounString();
+			print "~ is.^";
+			jump prompt;
+		}
+	}
+	noun = NounAliases(noun);
+        direction = TestDirections(noun);
+
+! Test if light should run out.
+	if (parent(item_9) ~= 0) {		! Light should be counted down.
+		if (--light_left <= 0) {
+			print "THE LIGHT HAS RUN OUT! ";
+			give flags f16;
+		} else {
+			if (light_left < 24) {
+				print "The light will run out in ",
+					light_left, " turns. ";
+			}
+		}
+	}
+
+!  Now let i be the corresponding verb number, stored in the dictionary entry
+!  (in a peculiar 255-n fashion for traditional Infocom reasons)...
+    	i = $ff-(verb_word->#dict_par2);
+
+!  ...then look up the i-th entry in the verb table, whose address is at word
+!  7 in the Z-machine (in the header), so as to get the address of the syntax
+!  table for the given verb...
+    	syntax = (0-->7)-->i;
+
+! Get the action number from the first verb line (there should only be one),
+! and then get the address of the actual routine to execute.
+	action = syntax->8;
+	action = #actions_table-->action;
+	if (meta ~= 0) {		! Handle meta-verbs.
+		indirect(action);
+		jump again;
+	} else {			! All other verbs.
+		@output_stream 3 big_buffer;
+		indirect(action);
+		flush_buffer();
+	}
+  }
+];
+
+!----------------------------------------------------------------------
+! flush_buffer --
+!	This procedure disables printing into the memory buffer
+!	and displays what has been stored so far.
+!	If some text was stored, an new line will be printed too,
+!	unless no_new_line parameter is true.
+!
+! Results:
+!	None.
+!----------------------------------------------------------------------
+[ flush_buffer
+ 	no_new_line			! INPUT: If non-zero, never print NL.
+	a c;
+	@output_stream -3;
+	if (big_buffer-->0 ~= 0) {
+		a = big_buffer+2;
+		c = big_buffer-->0;
+		@print_table a c 1;
+		if (no_new_line == 0) new_line;
+	}
+];
+
+! ----------------------------------------------------------------------
+! ReadCommand --
+!
+!	This procedure reads a line and converts the first two
+!	words found so that tokenise command can be used.
+!	(Any other word will be ignored.)
+!
+!	The following is done to each word:
+!	a) if the word starts with a '$', it is a meta-command;
+!	   the '$' is stripped and the rest is left as is
+!	   (meta-commands should be at least six-letter words)
+!	b) truncate it to the number of characters given by the
+!	   'abbreviate' variable
+!	c) if the the first character is a digit, the letter
+!	   'd' is prepended
+!	In addition, this procedure will save the first word
+!	in the verb_str buffer and the second in the noun_str
+!	buffer.
+!
+! Results:
+!	The final line is stored in the buffer 'buffer'.
+!	Returns the number of words (0, 1, or 2).
+! ----------------------------------------------------------------------
+[ ReadCommand
+	c			! Character
+	wn			! Word number
+	wbuf			! Buffer to store current word in
+	wbufp			! Pointer into wbuf
+	i			! Pointer to current character
+	linep			! Pointer to resulting line
+	left			! Characters left to copy
+	;
+	
+	raw_buffer->0 = buf_length-2;	! Leave room for terminating zero
+	raw_buffer->1 = 0;
+	@aread raw_buffer 0 c;
+	raw_buffer->(2+raw_buffer->1) = 0; ! Terminate buffer
+	linep = 2;
+	wbuf = verb_str;
+	i = 2;
+	c = raw_buffer->i++;
+	while (wn < 2) {
+		wbufp = 1;
+		while (c == ' ') {	! Skip leading spaces
+			c = raw_buffer->i++;
+		}
+		if (c == 0)
+			break;
+		if ('0' <= c && c <= '9') {
+			buffer->linep++ = 'd';
+		}
+		left = abbreviation;
+		if (c == '$') {			! Meta-command:
+			c = raw_buffer->i++;	!   skip $, 
+			left = 9;		!   no truncation
+		}
+		while (c ~= ' ' && c ~= 0) {	! Loop while not end of word
+			if (left > 0) {
+				buffer->linep++ = c;
+				left--;
+			}
+			wbuf->wbufp++ = c;
+			c = raw_buffer->i++;
+		}
+
+		! Make ready for next word (if any).
+		buffer->linep++ = ' ';		! Store separator
+		wbuf->0 = wbufp-1;		! Store length of complete word
+		if (wbuf == verb_str) {
+			wbuf = noun_str;
+		}
+		wn++;
+	}
+	buffer->1 = linep-2;
+	return wn;
+];
+
+[ VerbComplain    p c;
+	print "I don't know how to ~";
+	p = verb_str+1;
+	c = verb_str->0;
+	@print_table p c 1;
+	print "~.^";
+];
+
+!----------------------------------------------------------------------
+! RefreshStatusWindow --
+! 	This procedure redraws the status window, but only if something
+!	in it has actually changed.
+!
+! Results:
+!	None.
+!----------------------------------------------------------------------
+[ RefreshStatusWindow
+	has_light redraw_needed nw i;
+
+	SortItems(location, new_sorted);	! This must be done anyway.
+	if (location ~= old_location) {
+		redraw_needed = 1;
+		old_location = location;
+	}
+	has_light = HasLight();
+	if (has_light ~= old_has_light) {
+		redraw_needed = 1;
+		old_has_light = has_light;
+	}
+
+	!
+	! Check if any change in the list of visible items.
+	!
+	if (old_sorted->0 ~= new_sorted->0) {	! Length of lists differs
+		redraw_needed = 1;
+	} else {
+		! For speed, we will compare words.
+		! The SortItems routines has appended an extra 0 byte to
+		! the end of each array, to make sure that the last word
+		! will also compare okay.
+		nw = (new_sorted->0+2)/2;
+		for (i = 0: i < nw: i++) {
+			if (old_sorted-->i ~= new_sorted-->i) {
+				redraw_needed = 1;
+				break;
+			}
+		}
+	}
+
+	!
+	! Copy new item list to old.
+	!
+	i = new_sorted->0 + 2;
+	@copy_table new_sorted old_sorted i;
+
+	if (redraw_needed ~= 0) {
+		DrawStatusWindow(has_light);
+	}
+];
+
+!----------------------------------------------------------------------
+! DrawStatusWindow --
+! 	This procedure redraws the status window, unconditionally.
+!	Should only be called from RefreshStatusWindow().
+!
+! Results:
+!	None.
+!----------------------------------------------------------------------
+[ DrawStatusWindow
+	has_light		! INPUT: 1 if has light, 0 if darkness
+   i prop num a c;
+   last_row = 0;
+   flush_buffer();
+   print_buffer = big_buffer;
+   print_buffer-->0 = 0;
+   @output_stream 3 print_buffer;
+   if (has_light == 0) {
+	print "It's too dark; I can't see.";
+	jump end_status_line;
+   } else {
+   	print (string) location.description;
+   }
+   word_wrap();
+
+   print "Obvious exit";
+   for (i = 0: i < 6: i++) {
+       prop = dir_prop->i;
+       if (location.prop ~= 0) {
+	   num++;
+       }
+   }
+   if (num ~= 1) {
+     print "s";
+   }
+   print ": ";
+   for (i = 0: i < 6: i++) {
+       prop = dir_prop->i;
+       if (location.prop ~= 0) {
+	   print (string) dir_name-->i;
+	   print " ";
+       }
+   }
+   if (num == 0) {
+       print "NONE";
+   }
+   word_wrap();
+
+! --- Visible items
+   print "Visible items: ";
+   num = new_sorted->0;
+   if (num == 0) {
+	print "None";
+   } else {
+	for (i = 1: i <= num: i++) {
+		if (i > 1) print ", ";
+		print object, new_sorted->i;
+	}
+   }
+.end_status_line;
+   word_wrap();
+   @output_stream -3;
+
+   ! Now the new window size is determined.  Split window and print everything.
+   if (window_size ~= 0) {
+	@erase_window 1;
+   }
+   window_size = last_row+1;
+   @split_window window_size;
+   @set_window 1;
+   print_all();
+
+   ! Print separator line.
+   @set_cursor window_size 1;
+   a = separator+1; c = separator->0; @print_table a c 1;
+
+   ! Go back to lower text window.
+   @set_window 0;
+   @buffer_mode 1;
+   @output_stream 3 big_buffer;
+];
+
+[ word_wrap    n startp endp w len;
+   	@output_stream -3;
+	w = width - 1;
+	n = print_buffer-->0;
+	startp = print_buffer + 2;
+	while (w < n) {
+		last_row++;
+		string_ptr-->last_row = startp;
+		endp = startp+w;
+		while (endp->0 ~= ' ') endp--;
+		len = endp-startp;
+		string_len-->last_row = len;
+		n = n - len - 1;
+		startp = endp + 1;
+	}
+	if (n ~= 0) {
+		last_row++;
+		string_ptr-->last_row = startp;
+		string_len-->last_row = n;
+	}
+        print_buffer = print_buffer + print_buffer-->0 + 2;
+	print_buffer-->0 = 0;
+	@output_stream 3 print_buffer;
+];
+
+[ print_all   row p count;
+	for (row = 1: row <= last_row: row++) {
+		@set_cursor row 1;
+		p = string_ptr-->row;
+		count = string_len-->row;
+		@print_table p count 1;
+	}
+	if (script_flag == 0) return;
+	@set_window 0;
+	@output_stream -1;
+	new_line;
+	for (row = 1: row <= last_row: row++) {
+		p = string_ptr-->row;
+		count = string_len-->row;
+		@print_table p count 1;
+		new_line;
+	}
+	@output_stream 1;
+	@set_window 1;
+];
+
+[ SortItems owner buf
+	obj pos n order;
+
+	objectloop (obj in owner) {
+		pos = n+1;
+		order = obj.invent_order;
+		while (pos > 1 && order < (buf->(pos-1)).invent_order) {
+			buf->pos = buf->(pos-1);
+			pos--;
+		}
+		buf->pos = obj;
+		n++;
+	}
+	buf->(n+1) = 0;			! So that we can later compare
+					! words and not bytes.
+	buf->0 = n;
+];
+
+[ PrintInventory
+	num i;
+
+ 	print "I'm carrying: ";
+   	SortItems(player, new_sorted);
+   	num = new_sorted->0;
+   	if (num == 0) {
+		print "Nothing";
+   	} else {
+		for (i = 1: i <= num: i++) {
+			if (i > 1) print ", ";
+			print object, new_sorted->i;
+		}
+	}
+	print " ";      
+];
+
+[ ExchangeParents obj1 obj2 p1 p2;
+	p1 = parent(obj1);
+	p2 = parent(obj2);
+	if (p1 == 0) {
+		remove obj2;
+	} else {
+		move obj2 to p1;
+	}
+	if (p2 == 0) {
+		remove obj1;
+	} else {
+		move obj1 to p2;
+	}
+];
+
+[ Pickup item; ! Give player an item, unless he is carrying to much
+    if (children(player) >= max_carried) {
+	print "I'm carrying too much. ";
+    } else {
+    	move item to player;
+    }
+];
+
+[ GetAction    item;
+ 	if (noun == 0) {
+		print "What? ";
+		rfalse;
+	}
+	item = FindItem(location, noun);
+	if (item ~= 0) {
+		Pickup(item);
+	} else {
+		item = FindItem(player, noun);
+		if (item ~= 0) {
+			print "I'm already carrying it! ";
+		} else {
+			print "It's beyond my power to do that. ";
+		}
+	}
+];
+
+[ DropAction    item;
+ 	if (noun == 0) {
+		print "What? ";
+		rfalse;
+	}
+	item = FindItem(player, noun);
+	if (item == 0) {
+		print "I'm not carrying it. ";
+	} else {
+		move item to location;
+	}
+];
+
+[ FindItem owner noun   i;
+	objectloop (i in owner) {
+		if (i.name == noun)
+			return i;
+	}
+	rfalse;
+];
+
+[ MovePlayer dir   newloc light;
+	light = HasLight();
+	newloc = location.dir;
+	if (light == 0) print "It's dangerous to move in the dark. ";
+	if (newloc == 0) {
+		if (light ~= 0) {
+			print "I can't go in that direction. ";
+		} else {
+			print "I fell down and brok my neck! ";
+			give flags ~f15;
+			location = dead_room;
+			EndOfGame();
+		}
+	} else {
+		location = newloc;
+	}
+];
+
+[ HasLight    i;
+	i = parent(item_9);		! Light source
+	if (flags hasnt f15 || i == player or location)
+		rtrue;
+	rfalse;
+];
+
+[ DoSave   result;
+	@save result;
+	switch (result) {
+	0: print "Save failed. ";
+	1: print "OK. ";
+	2: @erase_window -1; old_location = 0;
+	}
+];
+
+[ ExchangeRoom regnum   t;
+	t = room_reg-->regnum;
+	room_reg-->regnum = location;
+	location = t;
+];
+
+[ ExchangeTimer regnum   t;
+	t = timer_reg-->regnum;
+	timer_reg-->regnum = timer;
+	timer = t;
+];
+
+[ PrintNounString   p c;
+	p = noun_str+1;
+	c = noun_str->0;
+	@print_table p c 1;
+];
+
+[ EndOfGame;
+	flush_buffer();
+	print  "This adventure is over. \
+		Do you want to try this adventure again? ";
+	if (YesOrNoChar() ~= 0) {
+		@restart;
+	}
+	quit;
+];
+
+[ PrintScore   num score i;
+	objectloop (i in treasure_room) {
+		if (i has treasure) num++;
+	}
+	score = 200 * num + no_treasures;
+	score = score / no_treasures;
+	score = score / 2;
+	print "I've stored ", num, " treasures. ";
+	print "On a scale from 0 to 100 that rates a ", score, ". ";
+	if (num == no_treasures) {
+		print "Well done.";
+		EndOfGame();
+	}
+];
+
+[ StopDelay   time;
+  time = 0;
+  rtrue;
+];
+
+!
+! Delay for two seconds.
+!
+[ Delay
+   	c;
+	flush_buffer(1);			! Print no new line.
+	@read_char 1 2 #r$StopDelay c;
+	@output_stream 3 big_buffer;
+	rtrue;
+];
+
+#ifdef DEBUG;
+[ ReplaySub;
+	@input_stream 1;
+];
+
+[ RecordOnSub;
+	@output_stream 4;
+];
+
+[ RecordOffSub;
+	@output_stream -4;
+];
+
+[ RandomSub
+	length p value c;
+	if (parse->1 >= 2) {
+		length = parse->8;
+		p = parse->9;
+		if (buffer->p == 'd') {
+			! Remember?  ReadCommand() has inserted a 'd'
+			! before digits!
+			p++;
+			length--;
+		}
+		while (length-- > 0) {
+			c = buffer->p++;
+			if ('0' <= c && c <= '9') {
+				value = value * 10 + c - '0';
+			} else {
+				break;
+			}
+		}
+		if (value <= 0) {
+			value = -1;
+		} else {
+			value = -value;
+		}
+	}
+	value = random(value);
+	"[Random number generator now predictable.]";
+];
+#endif;
+
+[ ScriptOnSub;
+	@output_stream 2;
+	script_flag = 1;
+	print "Start a transcript of ";
+	Title();
+	print ".^";
+	old_location = 0;
+];
+
+[ ScriptOffSub;
+	print "End of transcript.^";
+	@output_stream -2;
+	script_flag = 0;
+];
+
+!
+! Here comes the grammar for the meta-commands.
+!
+! To be sure to avoid clashes with the vocabulary of the translated
+! adventure, meta-commands should be words with at least six letters.
+! (The ordinary words are truncated to at most five characters,
+! meta-commands are not.)
+!
+verb meta "script" * -> ScriptOn;	! Turn on game transcript
+verb meta "noscript" "unscript" * -> ScriptOff;	! Turn off game transcript
+
+#ifdef DEBUG;
+verb meta "replay" * -> Replay;		! Replay command script
+verb meta "record" * -> RecordOn;	! Turn on command recording
+verb meta "norecord" * -> RecordOff;	! Turn off command recording
+verb meta "random" * -> Random;		! Make RNG predictable
+#endif;
+
+!
+! Start of game-specific stuff.
+!
+Object room_1 "Room 1"
+with
+  description "I'm outside the gates of the adventurers' guild",
+  e_to room_2;
+
+
+Object room_2 "Room 2"
+with
+  description "I'm in a meadow",
+  n_to room_3,
+  e_to room_4,
+  w_to room_1;
+
+Nearby item_6 "Apple tree"
+with 
+  invent_order 6,
+  initial_location room_2;
+
+
+Object room_3 "Room 3"
+with
+  description "I'm in a damp cave",
+  s_to room_2;
+
+Nearby item_0 "Ladder"
+with 
+  invent_order 0,
+  initial_location room_3;
+
+Nearby item_3 "Goblin"
+with 
+  invent_order 3,
+  initial_location room_3;
+
+
+Object room_4 "Room 4"
+with
+  description "I'm in a forest. There is a tree house at the top of the tree canopies",
+  w_to room_2;
+
+Nearby item_8 "Sign"
+with 
+  invent_order 8,
+  initial_location room_4;
+
+
+Object room_5 "Room 5"
+with
+  description "I'm inside a tree house",
+  d_to room_4;
+
+Nearby item_5 "Tshirt"
+with 
+  name "tsh",
+  invent_order 5,
+  initial_location room_5;
+
+
+Object item_1 "Ladder"
+with 
+  name "lad",
+  invent_order 1,
+  initial_location 0;
+
+Object item_2 "Pile of apples"
+with 
+  name "app",
+  invent_order 2,
+  initial_location 0;
+
+Object item_4 "Sleeping goblin"
+with 
+  invent_order 4,
+  initial_location 0;
+
+Object item_7 "Abused tree"
+with 
+  invent_order 7,
+  initial_location 0;
+
+Object item_9 "Dummy light source"
+with 
+  invent_order 9,
+  initial_location 0;
+
+object flags "flags";
+
+[ NounAliases noun;
+  switch (noun) {
+    'shi': return 'tsh';
+    't-s': return 'tsh';
+     default: return noun;
+  }
+];
+
+[ GoSub   matches; 
+  if (noun == 0) {
+     print "Please give me a direction also.";
+     return;
+  }
+  if (direction ~= 0) {
+     MovePlayer(direction);
+     rfalse;
+  }
+  if (matches ~= 0) print (string) CantDoYet;
+  else {
+    print (string) DontUnderstand;
+  }
+];
+
+[ GetSub   matches; 
+  if (noun == 'lad') {
+    matches++;
+    ! Get ladder fail
+    if (location ~= room_3) jump label_0;
+    if (parent(item_3) ~= location) jump label_0;
+    print "I start to reach for the ladder when the goblin starts to growl and bares its teeth. I can't remember if I had my tetanus shots recently so I'm backing off slowly. ";
+    rtrue;
+  }
+    .label_0;
+  if (matches ~= 0) print (string) CantDoYet;
+  else {
+    GetAction();
+  }
+];
+
+[ DroSub   matches; 
+  if (matches ~= 0) print (string) CantDoYet;
+  else {
+    DropAction();
+  }
+];
+
+[ ExaSub   matches; 
+  if (noun == 'tre') {
+    matches++;
+    ! Examine tree 1
+    if (parent(item_6) ~= location) jump label_1;
+    print "It's an apple tree with its branches heavy with red and juicy-looking apples. ";
+    rtrue;
+  }
+    .label_1;
+  if (noun == 'tre') {
+    matches++;
+    ! Examine tree 2
+    if (parent(item_7) ~= location) jump label_2;
+    print "This tree looks like it has seen better days. ";
+    rtrue;
+  }
+    .label_2;
+  if (noun == 'gob') {
+    matches++;
+    ! Examine goblin 1
+    if (parent(item_2) ~= location) jump label_3;
+    print "It's a dirty, sad looking little goblin. ";
+    rtrue;
+  }
+    .label_3;
+  if (noun == 'gob') {
+    matches++;
+    ! Examine goblin 2
+    if (parent(item_4) ~= location) jump label_4;
+    print "It's a dirty little goblin, snoring loudly, with a smile on its face. ";
+    rtrue;
+  }
+    .label_4;
+  if (noun == 'tsh') {
+    matches++;
+    ! Examine t-shirt
+    if (parent(item_5) ~= player && parent(item_5) ~= location) jump label_5;
+    print "The tshirt has a print on it saying: `Winners don't wear t-shirts. not.` ";
+    rtrue;
+  }
+    .label_5;
+  if (matches ~= 0) print (string) CantDoYet;
+  else {
+    print (string) DontUnderstand;
+  }
+];
+
+[ ReaSub   matches; 
+  if (noun == 'sig') {
+    matches++;
+    ! Read sign in forest
+    if (location ~= room_4) jump label_6;
+    print "Sign simply says: `Treasures above` ";
+    rtrue;
+  }
+    .label_6;
+  if (matches ~= 0) print (string) CantDoYet;
+  else {
+    print (string) DontUnderstand;
+  }
+];
+
+[ ClimbSub   matches; 
+  if (noun == 'lad') {
+    matches++;
+    ! Climb ladder to treehouse
+    if (location ~= room_4) jump label_7;
+    if (parent(item_1) ~= location) jump label_7;
+    location = room_5;
+    RefreshStatusWindow();
+    rtrue;
+  }
+    .label_7;
+  if (matches ~= 0) print (string) CantDoYet;
+  else {
+    print (string) DontUnderstand;
+  }
+];
+
+[ ShaSub   matches; 
+  if (noun == 'tre') {
+    matches++;
+    ! Shake tree
+    if (parent(item_6) ~= location) jump label_8;
+    ExchangeParents(item_7, item_6);
+    move item_2 to location;
+    RefreshStatusWindow();
+    rtrue;
+  }
+    .label_8;
+  if (matches ~= 0) print (string) CantDoYet;
+  else {
+    print (string) DontUnderstand;
+  }
+];
+
+[ WeaSub   matches; 
+  if (noun == 'tsh') {
+    matches++;
+    ! Wear tshirt
+    if (parent(item_5) ~= player && parent(item_5) ~= location) jump label_9;
+    print "As I start to put on the t-shirt the smell of mold and dust fills my nose. I'm going to need a long shower after this.  After finding the treasure (well, treasure shirt) my mission is complete and I will no doubt proceed to live happily ever after, without putting on silly dirty garments for the sake of some stupid trial ever again. ";
+    EndOfGame();
+    rtrue;
+  }
+    .label_9;
+  if (matches ~= 0) print (string) CantDoYet;
+  else {
+    print (string) DontUnderstand;
+  }
+];
+
+[ InvSub   matches; 
+  matches++;
+  ! Inventory
+  PrintInventory();
+  rtrue;
+  .label_10;
+  if (matches ~= 0) print (string) CantDoYet;
+  else {
+    print (string) DontUnderstand;
+  }
+];
+
+[ LooSub   matches; 
+  matches++;
+  ! Look
+  RefreshStatusWindow();
+  rtrue;
+  .label_11;
+  if (matches ~= 0) print (string) CantDoYet;
+  else {
+    print (string) DontUnderstand;
+  }
+];
+
+[ EachTurn; 
+  if (random(100) <= 50) {
+    ! Goblin stomach growling
+    if (location ~= room_3) jump label_12;
+    if (parent(item_3) ~= location) jump label_12;
+    print "I hear hungrily growling noises. ";
+  }
+    .label_12;
+  if (random(100) <= 100) {
+    ! Goblin eat apples
+    if (location ~= room_3) jump label_13;
+    if (parent(item_3) ~= location) jump label_13;
+    if (parent(item_2) ~= location) jump label_13;
+    print "The goblin quickly throws itself at the apples, devouring every piece in sight, in a flurry of teeth, saliva and random bits of flying vegetable matter. Eww! I think i got some in my hair! After the meal, the goblin blinks sleepily a couple of times and sinks down with a snore in the corner of the cave. ";
+    ! Goblin eat apples continued
+    remove item_2;
+    ExchangeParents(item_4, item_3);
+    ExchangeParents(item_1, item_0);
+    RefreshStatusWindow();
+    .clabel_0;
+  }
+  print "";
+    .label_13;
+    print "";
+];
+
+[ TestDirections n;
+  switch (n) {
+  'north': return n_to;
+  'south': return s_to;
+  'east': return e_to;
+  'west': return w_to;
+  'up': return u_to;
+  'down': return d_to;
+  default: return 0;
+  }
+];
+
+[ Title; print "ADVENTURE 0"; ];
+
+verb "go" * -> Go;
+verb "get" * -> Get;
+verb "dro" * -> Dro;
+verb "exa" "x" * -> Exa;
+verb "rea" * -> Rea;
+verb "climb" "use" * -> Climb;
+verb "sha" "hit" "kic" * -> Sha;
+verb "wea" * -> Wea;
+verb "inv" * -> Inv;
+verb "loo" * -> Loo;
+
+END
+
+Warning: Empty action ignored
+Warning: verb 'exa' defined more than once; only first definition used
+Warning: verb 'x' defined more than once; only first definition used
+Warning: verb 'go' defined more than once; only first definition used
+Warning: verb 'use' defined more than once; only first definition used
+
+The following verbs have empty verb actions:
+Go, Dro
+
