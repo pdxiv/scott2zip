@@ -1,0 +1,205 @@
+Scott2Zip, version 1.00
+-----------------------
+(RCS ID: $Id: README,v 1.2 1995/11/07 06:08:53 bjorn Exp $)
+
+Here is the first production version of Scott2Zip, a converter of
+the classic Scott Adams adventures to source which can be compiled
+with Inform.  The original adventure can be in either the TRS-80
+or TI-99/4 format.  The Brian Howarth's adventures, which are 
+free and can be found at GMD, can also be translated by Scott2Zip.
+
+Note that the Scott Adams adventures are still copyrighted.
+The translated version obtained by Scott2Zip is for your personal
+use only; it must not be distributed to others in any way.
+
+To use Scott2Zip, you'll need:
+
+* Perl 4.036
+* Inform 5.5 (no library needed)
+* An adventure in the TRS-80 format
+* A good Z-machine interpreter (Zip recommended)
+
+There are versions of Perl available for most operating systems,
+including Unix, MS-DOS, and VMS.
+
+Do like this to convert an adventure:
+
+	scott2zip pirate.dat > pirate.inf
+	inform pirate.inf
+
+Usually, Scott2Zip is able to find the title of the adventure in
+the game file itself (for most Scott Adams adventures).
+If that doesn't work, you can set the title yourself with the
+-t option.
+
+	scott2zip -t'The Time Machine' 2_timemachine.dat > timemachine.inf
+
+In addition, there is a an debugging option (-d), which will add
+debugging commands to the translated game.
+
+	scott2zip -d pirate.dat > pirate.inf
+
+Commands for recording and replay command scripts will be available.
+For further information, select the "Info about playing" item in the
+game itself.
+
+Scott2Zip is provided under the GNU General Public License.
+For further information, see the start of the scott2zip program and
+the file COPYING.
+
+Bug reports and suggestions can be sent to the address found below.
+
+Credits
+-------
+
+For help to understand the TRS-80 format, thanks to Paul David Doherty,
+who wrote the decompiler ScottDec, and to Alan Cox, who wrote the game
+driver ScottFree.
+
+Thanks to Graham Nelson, for creating Inform, and for documenting
+the Z-machine.
+
+Thanks to Graham Nelson and Gareth Rees, for suggesting how
+word-wrapping in the upper window could be done.
+
+Changes in 0.91
+---------------
+
+- TRS-80 format: The action 'Refill lamp' was not correctly translated,
+  causing a compilation error.
+
+- TRS-80 format: When the owner of an item was set to -1 (meaning player),
+  it was not correctly understood, aborting Scott2Zip.
+
+- Empty descriptions for items are converted to 'ITEMnn', where 'nn' is
+  the number of the items.  (Emtpy strings are not allowed by Inform
+  and the Z-machine.)  An earlier attempt to not include such items
+  in the converted file failed, because of a bug in 'Golden Odyssey',
+  there typing 'get sandals' would give you item 0 which has an empty
+  description.  You will never notice it, though, because you are immediately
+  thereafter killed for stealing!
+
+- TRS-80 format: Action 71, 'Save', was not translated correctly,
+  causing other trouble as well.
+
+- To avoid cluttering up the screen when compiling, any warnings about
+  strange things in the adventure being translated are now printed at
+  the end of the converted file.  In particular, that applies to
+  verbs without action.
+
+- The message "I'm carrying too much" was shown with an extra carriage
+  return.
+
+- Scott Adams' Adventure 14 contains an item belonging to room 50;
+  but the highest room number is 35.  Since the item obviously should
+  be in room zero (object store), Scott2Zip now changes the owner in
+  such cases to 0.  A warning will be shown at the end of the converted
+  file.
+
+- TRS-80 format: Action 89, 'Draw picture', is now properly ignored.
+
+- If an adventure defines a verb more than once, a warning message
+  will be written to the end of the converted file and all 
+  but the first definition will be ignored. (Earlier, Scott2Zip
+  didn't write the warning message.) Example: In 'Savage Island',
+  part 1, 'yell' is first defined as a separate verb, then later
+  as a synonym to 'ask'.
+
+- If an action references a noun which has too high number, 
+  the action will be ignored and a message written to the
+  end of the converted file. (4_arrow2)
+
+- All items with the description 'ITEMnn' (empty in the original
+  game file) and not referenced from any action will be listed at
+  the end of the file.
+
+- TRS-80 format: Continued actions didn't really work; now they do
+  (I hope).  There were several bugs.
+
+- TRS-80 format: Action 75, 'Put item x with item y', got the
+  arguments in the wrong order.
+
+- TRS-80 format: Empty actions (all zeros) was interpreted as
+  an each-turn action and causing trouble (resetting the address
+  for each-turn actions).
+
+- TRS-80 format: The argument to action 79, 'Set current counter value',
+  was truncated to an 8-bit value, making 'Mission Impossible' really
+  impossible (44 turns instead of 300 before the bomb explodes).
+
+Changes in 0.92
+---------------
+
+Reading of player commands rewritten, fixing the following:
+- A word beginning with digits will have the letter 'd' prepended to it.
+  Similarly, all dictionary words starting with digits also have
+  'd' prepended.  That is a workaround for the limitation in Inform
+  that dictionary words must start with a letter.
+- The complete typed verb will be retained in a buffer, so that it can be
+  printed if it turns out to be unknown. (I don't know how to "VERB".)
+- The meta-commands reimplemented.  They now all start with '$',
+  e.g. $replay.  The reading routine will strip the '$', but retain
+  all other letters in the word (note that ordinary games words are
+  truncated to 3, 4, or 5 letters).
+
+- Added the meta-commands $replay, $record, $norecord, $script, 
+  and $noscript (aka $unscript).
+
+- Fixed a stupid bug in the word_wrap routine (it caused two character
+  in the "visible items" list to be wiped out if the list was long).
+
+- Added the 'invent_order' property to each item, giving the order
+  in which items should be shown in inventory lists.
+
+- Changed inventory printing to print items sorted by the 'invent_order'
+  property.  This makes sures that we get 'space suit, which I'm wearing',
+  and not 'which I'm wearing, space suit' in 'Strange Odyssey'.
+
+- The status window is now only redrawn when something in it has changed.
+  This might speed up things on computers with slow screens, but far more
+  important is the next item.
+
+- If a game transcript is activated, the text in the status window will be
+  printed to the game transcript, but only when the contents has actually
+  changed.  (The routine to update the status window is now called
+  RefreshStatusWindow, instead of DrawStatusLine.)
+
+- Removed the confusing temp_light flag, used to provide light temporarily
+  even in darkness.  It shouldn't be there; games that need light
+  for a few shorts moments will fix that themeselves ('The Count', where
+  you can light a match in the dark pit to be able to see what's there).
+  
+- Eliminated unecessary blank lines between turns.
+
+- Scott2Zip will now try to find the name of the adventure and show it
+  when the game starts.  This is done by searching for a string similar
+  to:  "Welcome to Adventure number 2: `Pirate Adventure`".
+  If none is found, the title will be set to 'ADVENTURE nn', where nn
+  is the number of the adventure.  This can be overridden with the
+  command line option -t to set the title to anything.
+
+- TRS-80 format: The comments for actions (if any) will printed before
+  the translated action.
+
+- The parser somewhat cleaned up and commented.  Also added a check to
+  ensure that nouns have the noun bit set.  (Thus, 'get get' will be
+  rejected with the message: I don't know what a "get" is.)
+
+- Most of the meta-commands is now only included if the constant 
+  DEBUG is defined in the translated game.  To set the constant,
+  give the command line switch -d when running scott2zip.
+
+- Added the meta-command $random, to make the random number generator
+  predictable.  Given an optional numeric argument N, random(-N) will
+  be called.  $random will only be available in DEBUG-mode.
+
+- TRS-80 format: Improved error checking and error messages.  Now
+  missing quotation marks will be reported (Scott2Zip used to
+  go on processing forever).  Note that this is an issue only if you
+  have a corrupt game file or you try to translate something that is
+  not a game file.
+  
+
+Bjorn Gustavsson
+ermbgus@at.ericsson.se
+
