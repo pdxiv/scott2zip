@@ -1,0 +1,2252 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+# This is script is in -*- perl -*-.
+#
+#    Scott2Zip -- Converts Scott Adams adventures to Inform format.
+#    Copyright (C) 1995  Bjorn Gustavsson
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+#
+#
+# $Id: scott2zip,v 1.11 1995/11/07 06:09:17 bjorn Exp $
+#
+$version  = '1.00';
+$OBJS     = 0xc20;    # number of objects
+$VERBS    = 0xc21;    # number of verbs
+$NOUNS    = 0xc22;    # number of nouns
+$REDROOM  = 0xc23;    # the red room
+$MAXITEM  = 0xc24;    # max number of items that can be carried
+$BEGROOM  = 0xc25;    # starting room for player
+$NOTREA   = 0xc26;    # number of treasures
+$ABBREV   = 0xc27;    # minimum number of letters in commands
+$LIGHT    = 0xc28;    # maximum light time
+$TREASURE = 0xc2a;    # treasure room
+$OBJTABLE = 0xc2c;    # pointer to object table
+
+#$ORIGOBJS	= 0xc2e;	# pointer to original items
+$OBJLINK   = 0xc30;    # pointer to link table from noun to object
+$OBJDESC   = 0xc32;    # pointer to object descriptions
+$MESSAGES  = 0xc34;    # pointer to message pointers
+$ROOMEXITS = 0xc36;    # pointer to room exits table
+$ROOMDESC  = 0xc38;    # pointer to room descriptor pointers
+$NOUNTABLE = 0xc3a;    # pointer to noun table
+$VERBTABLE = 0xc3c;    # pointer to verb table
+$EXPLICIT  = 0xc3e;    # pointer to explicit action table
+$IMPLICIT  = 0xc40;    # pointer to implicit actions
+
+#
+# Translation table of TRS-80 conditions to the corresponding
+# TI-99/4 conditions.  All conditions, except 10 and 11,
+# take one argument.
+#
+%condition_xlat = (
+    1,  0xb7,    # Item carried
+    2,  0xb8,    # Item in current room
+    3,  0xb9,    # Item carried or in current room
+    4,  0xbf,    # Player in given room
+    5,  0xba,    # Item not in current room
+    6,  0xbb,    # Item not carried
+    7,  0xc0,    # Player not in given room
+    8,  0xc1,    # Given bit flag is set
+    9,  0xc2,    # Given bit flag is cleared
+    10, 0xc3,    # Something carried (no argument)
+    11, 0xc4,    # Nothing carried (no argument)
+    12, 0xbc,    # Item not carried nor in current room
+    13, 0xbd,    # Item not in room 0
+    14, 0xbe,    # Item in room 0
+    15, 0xc5,    # Counter <= argument
+    16, 0xc6,    # Counter > argument
+    17, 0xc8,    # Item in initial room
+    18, 0xc9,    # Item not in initial room
+    19, 0xc7,    # Counter == argument
+);
+
+#
+# Translation table of TRS-80 actions to the corresponding
+# TI-99/4 action.
+#
+%action_xlat = (
+    0,  '00 0',        # No operation
+    52, '0xdb 1',      # Get item (check that player can carry it)
+    53, '0xdc 1',      # Drop item
+    54, '0xdd 1',      # Move player to the given room
+    55, '0xde 1',      # Move item to room 0
+    56, '0xdf 0',      # Set darkness flag (flag 15)
+    57, '0xe0 0',      # Clear darkness flag (flag 15)
+    58, '0xe1 1',      # Set given bit flag
+    59, '0xde 1',      # Same as 55???
+    60, '0xe2 1',      # Clear given bit flag
+    61, '0xe5 0',      # Kill player
+    62, '0xe6 2 1',    # Put item in given room
+    63, '0xe7 0',      # Game over
+    64, '0xf0 0',      # Describe room
+    65, '0xe8 0',      # Score
+    66, '0xe9 0',      # Inventory
+    67, '0xe3 0',      # Set bit flag 0
+    68, '0xe4 0',      # Clear bit flag 0
+    69, '0xea 0',      # Refill lamp
+    70, '0 0',         # Ignore
+    71, '0xeb 0',      # Save game
+    72, '0xec 2 1',    # Swap the locations of the given items
+    73, '0xda 0',      # Continue -- specially handled
+    74, '0xed 1',      # Give item to player (no check that it can
+                       # carried)
+    75, '0xee 2 0',    # Put item1 with item2
+    76, '0xf1 0',      # Look
+    77, '0xf3 0',      # Decrement counter
+    78, '0xf4 0',      # Print counter
+    79, '0xd5 1',      # Set counter -- translated to home-made
+                       # opcode which supports 16 bits
+    80, '0xf8 0',      # Swap location with saved location 0
+    81, '0xfa 1',      # Swap counter with given saved counter
+    82, '0xf6 1',      # Add argument to counter
+    83, '0xf7 1',      # Subtract argument from counter
+    84, '0xfc 0',      # Echo last noun entered without new line
+    85, '0xfb 0',      # Echo last noun entered with new line
+    86, '0xfd 0',      # New line
+    87, '0xf9 1',      # Swap location with given saved location
+    88, '0xfe 0',      # Wait two seconds
+    89, '0 1',         # Draw picture -- ignore
+);
+
+for ( $i = 1 ; $i <= 51 ; $i++ ) {
+    $action_xlat{$i} = sprintf( "0x%02X 0", $i );
+    $action_xlat{ $i + 101 } = sprintf( "0x%02X 0", $i + 51 );
+}
+
+# Global variables
+$label           = 0;
+$label2          = 0;
+$indent          = 2;
+$title           = '';
+$adv_number      = 0;
+$game_version    = 0;
+$adventure_debug = 0;    # Debugging of the translated game.
+@exit_name = ( 'n_to', 's_to', 'e_to', 'w_to', 'u_to', 'd_to' );
+
+#
+# Debugging support.
+#
+$DBG_99_ACTIONS             = 1;
+$DBG_TRS80_ACTIONS          = 2;
+$DBG_UNSORTED_TRS80_ACTIONS = 4;
+$debug                      = 0;
+
+#
+# Test format of file.
+#
+while ( @ARGV && $ARGV[0] =~ /^-(\w)(.*)/ ) {
+    shift;
+    $title = $2, next if $1 eq 't';
+    $adventure_debug = 1, next if $1 eq 'd';
+    die "Unkown option: -$1";
+}
+die "Usage: scott2zip [-t'title'] [-d] file\n" if @ARGV != 1;
+$file = shift;
+if ( $file =~ /\.adv$/ ) {    # TI-99/4 format
+    $trs80 = 0;
+    &read_99_4($file);
+}
+else {
+    $trs80 = 1;
+    &read_trs80($file);
+}
+
+#
+# Print out the game parameters.
+#
+print "Constant DEBUG 1;\n" if $adventure_debug;
+print 'global format = "', $trs80 ? 'TRS-80' : 'TI-99/4', '";', "\n";
+print "global location = room_",  $first_room, ";\n";
+print "global dead_room = room_", $dead_room,  ";\n";
+print "global treasure_room = ",
+  $treasure_room == 0 ? 0 : "room_$treasure_room", ";\n";
+print "global no_treasures = ",       $no_treasures, ";\n";
+print "global max_carried = ",        $max_carried,  ";\n";
+print "global abbreviation = ",       $abbreviation, ";\n";
+print "global light_left = ",         $light_left,   ";\n";
+print 'Constant scott2zip_version "', $version,      '";', "\n";
+
+while (<DATA>) {
+    print;
+}
+
+#
+# This loop:
+#
+# 1. Makes sure that every item has a description, because empty strings
+#    are not allowed in Inform (and the Z-machine).
+#
+# 2. Sets up the %unref_items array with items which are probably useless.
+#    In this loop, items are considered useless if they have no name.
+#    The procedure fetch_obj, which actions use to fetch object numbers,
+#    will remove items from %unref_items if they are found out to be
+#    referenced anyway.
+#
+for ( $j = 0 ; $j <= $last_object ; $j++ ) {
+    if ( $obj_desc[$j] =~ /^\s*$/ ) {
+        $obj_desc[$j] = $unref_items{$j} = "ITEM$j";
+    }
+}
+
+#
+# Print all room objects.
+#
+for ( $i = 1 ; $i <= $last_room ; $i++ ) {
+    $_ = $room_desc[$i];
+    unless (s/^\*//) {
+        substr( $_, 0, 0 ) = "I'm in a ";
+    }
+    print "Object room_$i \"Room $i\"\nwith\n";
+    print '  description "', $_, '"';
+    @exit = split( ' ', $room_exit[$i] );
+    $separator = ",\n";
+    for ( $j = 0 ; $j < @exit ; $j++ ) {
+        next unless $exit[$j];
+        print $separator;
+        print '  ', $exit_name[$j], ' room_', $exit[$j];
+    }
+    print ";\n\n";
+
+    # Print any objects in this room.
+    for ( $j = 0 ; $j <= $last_object ; $j++ ) {
+        if ( $obj_loc[$j] == $i ) {
+            &PrintItem( $j, $i, $i );
+        }
+    }
+    print "\n";
+}
+
+#
+# Print any other objects.
+#
+for ( $j = 0 ; $j <= $last_object ; $j++ ) {
+    $owner = $obj_loc[$j];
+    if ( $owner > $last_room && $owner < 255 ) {
+        push(
+            @warn_general, "$obj_desc[$j] was found in room $owner, \
+which does not exist; changed to no owner."
+        );
+        $owner = 0;
+    }
+    next if $owner != 0 && $owner != 255;
+    &PrintItem( $j, $owner, -1 );
+}
+
+print "object flags \"flags\";\n";
+
+#
+# Pick up all the verbs.
+#
+for ( $i = 1 ; $i <= $last_verb ; $i++ ) {
+    $_ = $raw_verb[$i];
+    tr/A-Z/a-z/;
+    $synonym = s/^\*//;
+    if ( $verbs{$_} ) {
+        push( @warn_general,
+            "verb '$_' defined more than once; only first definition used" );
+        next;
+    }
+    next if /^\s*$/;    # Ignore empty verbs.
+    next if /^\.$/;     # Verbs consisting of only a period
+                        # seems to be some sort of filler.
+    substr( $_, 0, 0 ) = 'd' if /^\d/;
+    $verbs{$_}++;
+    if ($synonym) {
+        $verb[$#verb] .= " $_";
+        next;
+    }
+    push( @action, "\u$_" );
+    push( @verb,   $_ );
+    $verb_num[$#verb] = $i;
+}
+
+#
+# Pick up all nouns.
+#
+$last_real_noun = '';
+for ( $i = 1 ; $i <= $last_noun ; $i++ ) {
+    $_ = $raw_noun[$i];
+    tr/A-Z/a-z/;
+    $synonym = s/^\*//;
+    substr( $_, 0, 0 ) = 'd' if /^\d/;
+    $last_real_noun = $_ unless $synonym;
+    push( @noun_alias, $_ );
+    push( @noun,       $last_real_noun );
+}
+
+#
+# Print noun aliases.
+#
+print "\n[ NounAliases noun;\n";
+print "  switch (noun) {\n";
+for ( $i = 0 ; $i < @noun ; $i++ ) {
+    print "    '$noun_alias[$i]': return '$noun[$i]';\n"
+      if $noun_alias[$i] ne $noun[$i];
+}
+print "     default: return noun;\n";
+print "  }\n";
+print "];\n\n";
+
+#
+# Print all verb actions.
+#
+for ( $j = 0 ; $j < @action ; $j++ ) {
+    print "[ $action[$j]Sub   matches; \n";
+    if ( $verb_num[$j] == 1 ) {    # Go
+        print <<EOF;
+  if (noun == 0) {
+     print "Please give me a direction also.";
+     return;
+  }
+  if (direction ~= 0) {
+     MovePlayer(direction);
+     rfalse;
+  }
+EOF
+    }
+    $cp = $verb_action[ $verb_num[$j] ];
+    push( @warn_verb, $action[$j] )
+      unless defined $cp;
+    $cp = 0 unless defined $cp;
+    while ( $cp != 0 ) {
+        $noun_num = ord( substr( $core, $cp,     1 ) );
+        $offset   = ord( substr( $core, $cp + 1, 1 ) );
+        if ( $noun_num - 1 > $#noun ) {
+            push( @warn_general,
+                    "Reference to noun with too high number "
+                  . "($noun_num) -- action ignored" ),
+              next;
+        }
+        if ( $debug & $DBG_99_ACTIONS ) {
+            print "! $noun_num $offset [$action[$j]";
+            print " ", $noun[ $noun_num - 1 ] if $noun_num;
+            print "]\n";
+        }
+        if ( $noun_num == 0 ) {
+            print "  matches++;\n";
+            $indent = 2;
+            &translate_action( $cp + 2, 0 );
+        }
+        else {
+            $indent = 4;
+            print "  if (noun == '$noun[$noun_num-1]') {\n";
+            print "    matches++;\n";
+            &translate_action( $cp + 2, 0 );
+            print "  }\n";
+        }
+        print ' ' x $indent, ".label_", $label++, ";\n";
+    }
+    continue {
+        if ($offset) {
+            $cp += $offset + 1;
+        }
+        else {
+            $cp = 0;
+        }
+        $indent = 2;
+    }
+    &EndAction( $verb_num[$j] );
+    print "];\n\n";
+}
+
+#
+# Print each turn action.
+#
+print "[ EachTurn; \n";
+$cp     = $each_turn;
+$indent = 4;
+while ( $cp != 0 ) {
+    $code   = ord( substr( $core, $cp,     1 ) );
+    $offset = ord( substr( $core, $cp + 1, 1 ) );
+    if ( $debug & $DBG_99_ACTIONS ) {
+        print "! $code $offset [auto $code]\n";
+    }
+    print "  if (random(100) <= ", $code, ") {\n";
+    &translate_action( $cp + 2, 1 );
+    print "  }\n";
+    print ' ' x $indent, ".label_", $label++, ";\n";
+    if ($offset) {
+        $cp += $offset + 1;
+    }
+    else {
+        last;
+    }
+}
+print "];\n\n";
+
+#
+# Direction recognizer.
+#
+print "[ TestDirections n;\n";
+print "  switch (n) {\n";
+for ( $i = 0 ; $i < 6 ; $i++ ) {
+    print "  '$noun[$i]': return $exit_name[$i];\n";
+}
+print "  default: return 0;\n";
+print "  }\n";
+print "];\n\n";
+
+#
+# Print function which prints the title.
+#
+print '[ Title; print "';
+if ( $title ne '' ) {
+    print "\U$title";
+}
+else {
+    print "ADVENTURE ", $adv_number;
+}
+print '"; ];', "\n\n";
+
+#
+# Print grammar tables.
+#
+for ( $i = 0 ; $i < @verb ; $i++ ) {
+    @list = split( ' ', $verb[$i] );
+    print 'verb ';
+    foreach (@list) {
+        print '"', $_, '" ';
+    }
+    print "* -> $action[$i];\n";
+}
+
+#
+# Print warnings collected.
+#
+print "\nEND\n\n";
+if (@warn_general) {
+    foreach (@warn_general) {
+        print "Warning: $_\n";
+    }
+    print "\n";
+}
+if (@warn_verb) {
+    print "The following verb";
+    print "s" if @warn_verb > 1;
+    print @warn_verb == 1 ? " has" : " have";
+    print " empty verb action";
+    print "s" if @warn_verb > 1;
+    print ":\n";
+    $sep = '';
+    foreach (@warn_verb) {
+        print "$sep$_";
+        $sep = ', ';
+    }
+    print "\n\n";
+}
+
+$a = $b = 0;    # Removes warning.
+@keys = sort { $a <=> $b; } keys %unref_items;
+if (@keys) {
+    print "The following item";
+    print "s" if @keys > 1;
+    print @keys == 1 ? " is" : " are";
+    print " never referenced:\n";
+    $sep = '';
+    foreach (@keys) {
+        print "$sep$unref_items{$_}";
+        $sep = ', ';
+    }
+    print "\n";
+}
+
+#print "#listverb; #listdict;\n";
+
+#
+# Read a file in the TI-99/4 format.
+#
+sub read_99_4 {
+    local ($file) = @_;
+
+    # Read the complete file.
+    open( FILE, $file ) || die "Failed to open $file for reading: $!";
+    print STDERR "$file (TI-99/4 format)\n";
+    $core = '';
+    sysread( FILE, $core, 65536 ) || die;
+    close FILE;
+    substr( $core, 0, 0 ) = ' ' x 0x400;
+
+    # Pick out the header parameters.
+    $first_room    = ord( substr( $core, $BEGROOM,  1 ) );
+    $dead_room     = ord( substr( $core, $REDROOM,  1 ) );
+    $treasure_room = ord( substr( $core, $TREASURE, 1 ) );
+    $no_treasures  = ord( substr( $core, $NOTREA,   1 ) );
+    $max_carried   = ord( substr( $core, $MAXITEM,  1 ) );
+    $abbreviation  = ord( substr( $core, $ABBREV,   1 ) );
+    $light_left = unpack( "n", substr( $core, $LIGHT, 2 ) );
+
+    #
+    # Pick up pointers.
+    #
+    $last_verb = ord( substr( $core, $VERBS, 1 ) );
+    $last_noun = ord( substr( $core, $NOUNS, 1 ) );
+    $verb      = unpack( "n", substr( $core, $VERBTABLE, 2 ) );
+    $noun      = unpack( "n", substr( $core, $NOUNTABLE, 2 ) );
+    $msg_table = unpack( "n", substr( $core, $MESSAGES,  2 ) );
+    $each_turn = unpack( "n", substr( $core, $IMPLICIT,  2 ) );
+
+    #
+    # Pick up all nouns.
+    #
+    for ( $i = 0 ; $i <= $last_noun ; $i++ ) {
+        $_ = &get_string( $noun, $i );
+        push( @raw_noun, $_ );
+    }
+
+    #
+    # Pick up all the verbs.
+    #
+    for ( $i = 0 ; $i <= $last_verb ; $i++ ) {
+        $_ = &get_string( $verb, $i );
+        push( @raw_verb, $_ );
+    }
+
+    &read_objects;
+
+    #
+    # Pick up rooms.
+    #
+    $last_room = $first_room;
+    $last_room = $treasure_room if $treasure_room > $last_room;
+    $last_room = $dead_room if $dead_room > $last_room;
+    local ($roomdesc)  = unpack( "n", substr( $core, $ROOMDESC,  2 ) );
+    local ($roomexits) = unpack( "n", substr( $core, $ROOMEXITS, 2 ) );
+    local ($i);
+    local (@exit);
+    push( @room_desc, '' );
+    push( @room_exit, join( ' ', (0) x 6 ) );
+
+    for ( $i = 1 ; $i <= $last_room ; $i++ ) {
+        $_ = &get_string( $roomdesc, $i );
+        push( @room_desc, $_ );
+        @exit = unpack( "CCCCCC", substr( $core, $roomexits + 6 * $i, 6 ) );
+        foreach (@exit) {
+            $last_room = $_ if $last_room < $_;
+        }
+        push( @room_exit, join( ' ', @exit ) );
+    }
+
+    local ($verb_action) = unpack( "n", substr( $core, $EXPLICIT, 2 ) );
+    @verb_action =
+      unpack( "n*", substr( $core, $verb_action, $last_verb * 2 + 2 ) );
+}
+
+#
+# Read a file in the TRS-80 format.
+#
+sub read_trs80 {
+    local ($file) = @_;
+    local ($i);
+    local ($_);
+    open( FILE, $file ) || die "Failed to open $file for reading: $!";
+    print STDERR "$file (TRS-80 format)\n";
+    local (@file);
+    while (<FILE>) {
+        chop;
+        s/^\s*//;
+        s/\s*$//;
+        push( @file, $_ );
+    }
+    close FILE;
+    local ($num_lines) = scalar(@file);
+
+    # Pick out the header parameters.
+    shift(@file);    # Ignore unknown first parameter.
+    $last_object = shift(@file);    # 1
+    $num_actions = shift(@file);    # 2
+    local ($num_noun_verb) = shift(@file);    # 3
+    $last_room     = shift(@file);            # 4
+    $max_carried   = shift(@file);            # 5
+    $first_room    = shift(@file);            # 6
+    $no_treasures  = shift(@file);            # 7
+    $abbreviation  = shift(@file);            # 8
+    $light_left    = shift(@file);            # 9
+    $last_message  = shift(@file);            # 10
+    $treasure_room = shift(@file);            # 11
+    $dead_room     = $last_room;
+
+    # Pick up the actions.
+    &pickup_trs80_actions;
+
+    # Pick up the verb and noun tables.
+    for ( $i = 0 ; $i <= $num_noun_verb ; $i++ ) {
+        $_ = shift(@file);
+        &trs80_error("Illegal verb: $_")
+          unless /^\"([^\"]*)\"$/;
+        push( @raw_verb, $1 );
+        $_ = shift(@file);
+        &trs80_error("Illegal noun: $_")
+          unless /^\"([^\"]*)\"$/;
+        push( @raw_noun, $1 );
+    }
+
+    # Remove empty entries at the end of the @raw_verb array.
+    while (@raw_verb) {
+        last unless $raw_verb[$#raw_verb] =~ /^\s*$/;
+        pop(@raw_verb);
+    }
+    $last_verb = $#raw_verb;
+
+    # Remove empty entries at the end of the @raw_noun array.
+    while (@raw_noun) {
+        last unless $raw_noun[$#raw_noun] =~ /^\s*$/;
+        pop(@raw_noun);
+    }
+    $last_noun = $#raw_noun;
+
+    # Pick up the rooms.
+    local (@exit);
+    local ( $i, $j );
+    for ( $i = 0 ; $i <= $last_room ; $i++ ) {
+        for ( $j = 0 ; $j < 6 ; $j++ ) {
+            $_ = shift(@file);
+            &trs80_error("Illegal room exit: $_")
+              unless /^\s*(\d+)\s*$/;
+            $exit[$j] = $1;
+        }
+        $room_exit[$i] = join( ' ', @exit );
+        $_ = shift(@file);
+        &trs80_error("Room description does not start with \": $_")
+          unless /^\"/;
+        while ( !/^\"([^\"]*)\"\s*/ ) {
+            $_ .= ' ' . shift(@file);
+        }
+        &trs80_error("Illegal room description: $_")
+          unless /^\"([^\"]*)\"$/;
+        $_ = $1;
+        s/-/\"/g;
+        push( @room_desc, $1 );
+    }
+
+    # Read all messages.
+    for ( $i = 0 ; $i <= $last_message ; $i++ ) {
+        $_ = shift(@file);
+        &trs80_error("Message does not start with \": $_")
+          unless /^\"/;
+        while ( !/^\"([^\"]*)\"\s*/ ) {
+            $_ .= ' ' . shift(@file);
+        }
+        &trs80_error("Illegal message")
+          unless /^\"([^\"]*)\"$/;
+        push( @message, $1 );
+    }
+    $i = 0;
+
+    # Pick up all objects.
+    local ( $link, $owner );
+    for ( $i = 0 ; $i <= $last_object ; $i++ ) {
+        $_ = shift(@file);
+        &trs80_error("Object description does not start with \": $_")
+          unless /^\"/;
+        while ( !/\" (-?\d+)/ ) {
+            $_ .= ' ' . shift(@file);
+        }
+        &trs80_error("Illegal object definition: $_")
+          unless /^\"([^\"]*)\" (-?\d+)\s*$/;
+        $_ = $1;
+        $owner = $2 == -1 ? 255 : $2;
+        push( @obj_loc, $owner );
+        $obj_link[$i] = 0;
+        if (s@/(\w+)/$@@) {
+            $link = $1;
+            $link =~ tr/A-Z/a-z/;
+            $obj_link[$i] = $link;
+        }
+        push( @obj_desc, $_ );
+    }
+
+    #
+    # Pick up the comments, then translate the actions to 99/4 format.
+    #
+    for ( $i = 0 ; $i <= $num_actions ; $i++ ) {
+        $_ = shift(@file);
+        &trs80_error("Comment does not start with \": $_")
+          unless /^\"/;
+        while ( !/\"/ ) {
+            $_ .= ' ' . shift(@file);
+        }
+        &trs80_error("Illegal comment: $_")
+          unless /^\"([^\"]*)\"$/;
+        $_ = $1;
+        tr/A-Z/a-z/;
+        $unsorted_actions[$i] .= " \u$_"
+          unless /^\s*$/;
+    }
+    &sort_trs80_actions;
+    $game_version = shift(@file);
+    $adv_number   = shift(@file);
+
+    #    print STDERR "Number $adv_number, version $game_version\n";
+    &trs80_actions;
+}
+
+sub trs80_error {
+    local ($string) = @_;
+    die 'Line ', $num_lines - scalar(@file), ': ', $string, "\n";
+}
+
+#
+# Translate the TRS-80 actions to the TI-99/4 format.
+#
+sub trs80_actions {
+    local ( $i,    $_ );
+    local ( $verb, $noun );
+    local (@cond);      # The TRS-80 conditions.
+    local (@action);    # The TRS-80 actions.
+    local (@xlat) = (0);    # All translated conditions and actions.
+    local (@last_xlat);     # The last translated conditions and actions.
+    local (@param);         # Parameter stack.
+    local ($current_verb) = -1;    # The current verb.
+    local ($continuation) = 0;     # Continuation is active.
+    local (@patches)      = (0);
+    local ($patch);
+    local ($comment);              # Comment for this action.
+
+    print "! Sorted TRS-80 actions:\n"
+      if $debug & $DBG_TRS80_ACTIONS;
+
+    foreach $action (@trs80_action) {
+        ( $verb, $noun, @cond[ 0 .. 6 ], $comment ) = split( ' ', $action, 10 );
+        push( @warn_general, "Empty action ignored" ), next
+          if !$continuation && $verb == 0 && $noun == 0;
+
+        #
+        # See if continuation ends.
+        #
+        if ( $verb != 0 || $noun != 0 ) {
+            $continuation = 0;
+        }
+
+        $patch = shift(@patches);
+        $last_xlat[$patch] = @last_xlat - $patch if $patch;
+
+        if ($continuation) {
+            push( @last_xlat, 0xda );
+            push( @last_xlat, 0 );
+            push( @patches,   $#last_xlat );
+        }
+
+        unless ($continuation) {
+            push( @last_xlat, 255 );
+            if ( $verb == $current_verb ) {
+                $last_xlat[1] = $#last_xlat;
+            }
+            push( @xlat, @last_xlat );
+            if ( $debug & $DBG_TRS80_ACTIONS ) {
+                print "! --> @last_xlat\n";
+                print "! $verb $noun @cond\n";
+            }
+            @last_xlat = ();
+        }
+
+        @param = splice( @cond, 5, 2 );
+        @action = ();
+        for ( $i = 0 ; $i < 2 ; $i++ ) {
+            $_ = shift(@param);
+            push( @action, int( $_ / 150 ) );
+            push( @action, $_ % 150 );
+        }
+        @param = ();
+        if ( $verb != $current_verb && !$continuation ) {
+            if ( $verb == 0 ) {
+                $each_turn = @xlat;
+            }
+            else {
+                $verb_action[$verb] = @xlat;
+            }
+            $current_verb = $verb;
+        }
+
+        #
+        # Convert each condition.
+        #
+        unless ($continuation) {
+            push( @last_xlat, $noun );
+            push( @last_xlat, 0 );
+        }
+        $action_comment{ @xlat + @last_xlat } = $comment;
+        local ( $code, $value );
+        foreach (@cond) {
+            $code  = $_ % 20;
+            $value = ( $_ - $code ) / 20;
+            push( @param, $value ), next if $code == 0;
+            push( @last_xlat, $condition_xlat{$code} );
+            push( @last_xlat, $value ) unless $code == 10 || $code == 11;
+        }
+
+        #
+        # Convert each action.
+        #
+        local ( $num_args, @p );
+        foreach (@action) {
+            next if $_ == 0 || $_ == 70;
+            if ( $_ == 73 ) {    # 'Continue'
+                @patches      = (0);
+                $continuation = 1;
+                next;
+            }
+            ( $code, $num_args, $reverse ) = split( ' ', $action_xlat{$_} );
+            $code = hex($code);
+            print "! ??? $_ $code ???\n" unless defined $num_args;
+            @p = ();
+            if ( $num_args == 2 && $reverse ) {    # Reverse the arguments.
+                while ( $num_args-- > 0 ) {
+                    unshift( @p, shift(@param) );
+                }
+            }
+            else {                                 # Fetch the argument(s).
+                while ( $num_args-- > 0 ) {
+                    push( @p, shift(@param) );
+                }
+            }
+
+            if ( $_ == 79 ) {    # Set timer is special. The timer value must
+                                 # be broken up into two bytes.
+                push( @last_xlat, $code, int( $p[0] / 256 ), $p[0] % 256 );
+                next;
+            }
+
+            #
+            # Any code translated to zero should be ignored.
+            #
+            push( @last_xlat, $code, @p )
+              if $code;
+        }
+    }
+    push( @last_xlat, 255 );
+    push( @xlat,      @last_xlat );
+    $core = pack( "C*", @xlat );
+}
+
+#
+# Pick up the TRS-80 actions.
+#
+sub pickup_trs80_actions {
+    local ( $an, $i, $_ );
+    local (@action);
+    local (@t);
+    local ( $verb, $noun );
+
+    # Get all actions.
+    for ( $an = 0 ; $an <= $num_actions ; $an++ ) {
+        @t = ();
+        for ( $i = 0 ; $i < 8 ; $i++ ) {
+            push( @t, shift(@file) );
+        }
+        $_    = shift(@t);
+        $noun = $_ % 150;
+        $verb = ( $_ - $noun ) / 150;
+        push( @unsorted_actions, join( ' ', $verb, $noun, @t ) );
+    }
+}
+
+#
+# Sort the the TRS-80 actions, so that all occurrences of each
+# verb come together.
+#
+sub sort_trs80_actions {
+    local ( $i,    $_ );
+    local ( $verb, $noun );
+
+    # Print out the actions before sorting if requested.
+    if ( $debug & $DBG_UNSORTED_TRS80_ACTIONS ) {
+        print "! Unsorted TRS-80 actions follows:\n";
+        foreach (@unsorted_actions) {
+            print "! $_\n";
+        }
+    }
+
+    # Make sure that all occurrences of each verb are grouped together.
+    @trs80_action = ();
+    local ( $cv, $cn );
+    local ($look_for_cont);
+    while (@unsorted_actions) {
+        $_ = shift(@unsorted_actions);
+        ( $verb, $noun ) = split(' ');
+        push( @trs80_action, $_ );
+        $i             = 0;
+        $look_for_cont = 1;
+        while ( $i < @unsorted_actions ) {
+            ( $cv, $cn ) = split( ' ', $unsorted_actions[$i] );
+            if (   ( $cv == $verb && ( $cv != 0 || $cn != 0 ) )
+                || ( $look_for_cont && $cv == 0 && $cn == 0 ) )
+            {
+                push( @trs80_action, $unsorted_actions[$i] );
+                splice( @unsorted_actions, $i, 1 );
+                $look_for_cont = 1;
+                next;
+            }
+            $look_for_cont = 0;
+            $i++;
+        }
+    }
+
+    # Print out the actions after sorting if requested.
+    if ( $debug & $DBG_TRS80_ACTIONS ) {
+        print "! Sorted TRS-80 actions follows:\n";
+        foreach (@trs80_action) {
+            print "! $_\n";
+        }
+    }
+
+}
+
+sub EndAction {
+    local ($number) = @_;
+    print "  if (matches ~= 0) print (string) CantDoYet;\n";
+    print "  else {\n";
+    local ($in) = ' ' x 4;
+    if ( $number == 10 ) {    # Get
+        print $in, "GetAction();\n";
+    }
+    elsif ( $number == 18 ) {    # Drop
+        print $in, "DropAction();\n";
+    }
+    else {
+        print "    print (string) DontUnderstand;\n";
+    }
+    print "  }\n";
+}
+
+sub PrintItem {
+    local (
+        $item,                   # The number of the item to print.
+        $owner,                  # The owner of the item (0 - none,
+                                 # 1..254 - that room, 255 - player).
+        $current                 # Current room being defined or 0 for no room.
+    ) = @_;
+    local ($desc) = $obj_desc[$item];
+    if ( $owner eq $current ) {
+        print "Nearby item_$item \"$desc\"";
+    }
+    else {
+        print "Object item_$item \"$desc\"";
+        if ( $owner == 255 ) {
+            print " player";
+        }
+        elsif ( $owner != 0 ) {
+            print " room_$owner";
+        }
+    }
+    print "\n";
+    print "has treasure\n" if $obj_desc[$item] =~ /^\*/;
+    print "with \n";
+    print "  name \"$obj_link[$item]\",\n" if $obj_link[$item];
+    print "  invent_order $item,\n";
+    print "  initial_location ";
+    if ( $owner == 0 ) {
+        print 0;
+    }
+    elsif ( $owner == 255 ) {
+        print "player";
+    }
+    elsif ( $owner != 0 ) {
+        print "room_$owner";
+    }
+    print ";\n\n";
+}
+
+sub get_string {
+    local ( $table, $index ) = @_;
+    local ($_) = &get_descriptor( $table, $index );
+    tr/[\x00-\x1F\x80-\xFF]/ /;
+    s/^\s*//;
+    $_ = ' ' if $_ eq '';
+    $_;
+}
+
+sub get_descriptor {
+    local ( $table, $index ) = @_;
+    local ( $start, $end ) =
+      unpack( "nn", substr( $core, $table + 2 * $index, 4 ) );
+    substr( $core, $start, $end - $start );
+}
+
+sub read_objects {
+    $last_object = ord( substr( $core, $OBJS, 1 ) );
+    local ($objdesc) = unpack( "n", substr( $core, $OBJDESC,  2 ) );
+    local ($objloc)  = unpack( "n", substr( $core, $OBJTABLE, 2 ) );
+    local ($i);
+    local ($_);
+    for ( $i = 0 ; $i <= $last_object ; $i++ ) {
+        $_ = &get_string( $objdesc, $i );
+        last if $_ eq ' ' && @obj_desc != 0;
+        $obj_desc[$i] = $_;
+    }
+    $last_object = $i - 1;
+    @obj_loc     = unpack( "C*", substr( $core, $objloc, $last_object + 1 ) );
+    $obj_link    = unpack( "n", substr( $core, $OBJLINK, 2 ) );
+    @obj_link    = unpack( "C*", substr( $core, $obj_link, $last_object + 1 ) );
+    foreach (@obj_link) {
+        $_ = $raw_noun[$_] if $_;
+        tr/A-Z/a-z/;
+    }
+}
+
+sub translate_action {
+    local ( $cp, $implicit ) = @_;
+    local ( $obj, $room );
+    local ($in) = ' ' x $indent;
+    local ($offset);
+    local ($_);
+
+    $label_addr = 0;
+
+    while (1) {
+        if ( $cp == $label_addr ) {
+            print ' ' x $indent, ".clabel_", $label2++, ";\n";
+            $label_addr = 0;
+        }
+        if ( defined $action_comment{$cp} ) {
+            print "$in! $action_comment{$cp}\n";
+        }
+        local ($opcode) = &fetch;
+        if ( $opcode < 0xB7 ) {
+            print $in, "print \"";
+            if ($trs80) {
+                $_ = $message[$opcode];
+                print $_;
+                $title = $1
+                  if /Welcome to [\w\s\d:,]+ \`([^\`]+)\`/;
+            }
+            else {
+                $_ = &get_string( $msg_table, $opcode );
+                tr/\\/ /;
+                $title = $1
+                  if /Welcome to [\w\s\d:,]+ \'([^\']+)\'/;
+                print $_;
+            }
+            print " \";\n";
+            next;
+        }
+        elsif ( $opcode == 0xB7 ) {    # Object carried?
+            $obj = &fetch_obj;
+            &skip("parent($obj) ~= player");
+            next;
+        }
+        if ( $opcode == 0xb8 ) {       # Object in this room?
+            $obj = &fetch_obj;
+            &skip("parent($obj) ~= location");
+            next;
+        }
+        if ( $opcode == 0xb9 ) {       # Is object available?
+            $obj = &fetch_obj;
+            &skip("parent($obj) ~= player && parent($obj) ~= location");
+            next;
+        }
+        if ( $opcode == 0xba ) {       # Is the object not in the room?
+            $obj = &fetch_obj;
+            &skip("parent($obj) == location");
+            next;
+        }
+        if ( $opcode == 0xbb ) {       # Is the object not carried?
+            $obj = &fetch_obj;
+            &skip("parent($obj) == player");
+            next;
+        }
+        if ( $opcode == 0xbc ) {   # Is object neither in this room nor carried?
+            $obj = &fetch_obj;
+            &skip("parent($obj) == player || parent($obj) == location");
+            next;
+        }
+        if ( $opcode == 0xbd ) {    # Does object exist?
+            $obj = &fetch_obj;
+            &skip("parent($obj) == 0");
+            next;
+        }
+        if ( $opcode == 0xbe ) {    # Does object not exist?
+            $obj = &fetch_obj;
+            &skip("parent($obj) ~= 0");
+            next;
+        }
+        if ( $opcode == 0xbf ) {    # Is the player in specified room?
+            $room = &fetch_room;
+            &skip("location ~= $room");
+            next;
+        }
+        if ( $opcode == 0xc0 ) {    # Is the player not in specified room?
+            $room = &fetch_room;
+            &skip("location == $room");
+            next;
+        }
+        if ( $opcode == 0xc1 ) {    # Is specified flag set?
+            $flag = &fetch_flag;
+            &skip("flags hasnt $flag");
+            next;
+        }
+        if ( $opcode == 0xc2 ) {    # Is specified flag clear?
+            $flag = &fetch_flag;
+            &skip("flags has $flag");
+            next;
+        }
+        if ( $opcode == 0xc3 ) {    # Is the player carrying anything?
+            &skip("children(player) == 0");
+            next;
+        }
+        if ( $opcode == 0xc4 ) {    # Is the player not carrying anything?
+            &skip("children(player) ~= 0");
+            next;
+        }
+        if ( $opcode == 0xc5 ) {    # Is timer <= argument?
+            $_ = &fetch;
+            &skip("timer > $_");
+            next;
+        }
+        if ( $opcode == 0xc6 ) {    # Is timer > argument?
+            $_ = &fetch;
+            &skip("timer <= $_");
+            next;
+        }
+        if ( $opcode == 0xc7 ) {    # Is timer == argument?
+            $_ = &fetch;
+            &skip("timer ~= $_");
+            next;
+        }
+        if ( $opcode == 0xc8 ) {    # Is object n not moved?
+            $obj = &fetch_obj;
+            &skip("$obj notin $obj.initial_location");
+            next;
+        }
+        if ( $opcode == 0xc9 ) {    # Is object n moved?
+            $obj = &fetch_obj;
+            &skip("$obj in $obj.initial_location");
+            next;
+        }
+        if ( $opcode == 0xd5 ) {    # New opcode only for translation
+                                    # from TRS-80 -- not found in real games.
+                                    # Set timer to 16-bit value.
+            $_ = &fetch;
+            $_ = $_ * 256 + &fetch;
+            print $in, "timer = $_;\n";
+            next;
+        }
+        if ( $opcode == 0xd6 ) {    # Turn on automatic inventory
+            print $in, "auto_inventory = 1;\n";
+            next;
+        }
+        if ( $opcode == 0xd7 ) {    # Turn off automatic inventory
+            print $in, "auto_inventory = 0;\n";
+            next;
+        }
+        if ( $opcode == 0xd8 ) {    # Don't change color at quit
+            print "! No color change at exit\n";
+            next;
+        }
+        if ( $opcode == 0xd9 ) {    # Show success color at quit
+            print "! Success color\n";
+            next;
+        }
+        if ( $opcode == 0xda ) {    # Conditional branch
+            $offset     = &fetch;
+            $label_addr = $cp + $offset - 1;
+            next;
+        }
+        if ( $opcode == 0xdb ) {    # Get object
+            $obj = &fetch_obj;
+            print $in, "Pickup($obj);\n";
+            next;
+        }
+        if ( $opcode == 0xdc ) {    # Put down object
+            $obj = &fetch_obj;
+            print $in, "move $obj to location;\n";
+            next;
+        }
+        if ( $opcode == 0xdd ) {    # Go to room
+            $room = &fetch_room;
+            print $in, "location = $room;\n";
+            next;
+        }
+        if ( $opcode == 0xde ) {    # Delete object
+            $obj = &fetch_obj;
+            print $in, "remove $obj;\n";
+            next;
+        }
+        if ( $opcode == 0xdf ) {    # Set flag 15
+            print $in, "give flags f15;\n";
+            next;
+        }
+        if ( $opcode == 0xe0 ) {    # Clear flag 15
+            print $in, "give flags ~f15;\n";
+            next;
+        }
+        if ( $opcode == 0xe1 ) {    # Set flag N
+            $flag = &fetch_flag;
+            print $in, "give flags $flag;\n";
+            next;
+        }
+        if ( $opcode == 0xe2 ) {    # Clear flag N
+            $flag = &fetch_flag;
+            print $in, "give flags ~$flag;\n";
+            next;
+        }
+        if ( $opcode == 0xe3 ) {    # set flag 0
+            print $in, "give flags f0;\n";
+            next;
+        }
+        if ( $opcode == 0xe4 ) {    # clear flag 0
+            print $in, "give flags ~f0;\n";
+            next;
+        }
+        if ( $opcode == 0xe5 ) {    # Go to the Room of Death
+            print $in, "location = dead_room;\n";
+            next;
+        }
+        if ( $opcode == 0xe6 ) {    # Set n1 to owner of object n2
+            $room = &fetch_room;
+            $obj  = &fetch_obj;
+            print $in, "move $obj to $room;\n";
+            next;
+        }
+        if ( $opcode == 0xe7 ) {    # Quit
+            print $in, "EndOfGame();\n";
+            next;
+        }
+        if ( $opcode == 0xe8 ) {    # Print score
+            print $in, "PrintScore();\n";
+            next;
+        }
+        if ( $opcode == 0xe9 ) {    # Inventory
+            print $in, "PrintInventory();\n";
+            next;
+        }
+        if ( $opcode == 0xea ) {    # Restore light timer and turn on light
+            print $in, "light_left = ", $light_left, ";\n";
+            print $in, "move item_9 to player;\n";
+            next;
+        }
+        if ( $opcode == 0xeb ) {    # Save game
+            print $in, "DoSave();\n";
+            next;
+        }
+        if ( $opcode == 0xec ) {    # Exchange owners of n1 and n2
+            $obj  = &fetch_obj;
+            $obj2 = &fetch_obj;
+            print $in, "ExchangeParents($obj, $obj2);\n";
+            next;
+        }
+        if ( $opcode == 0xed ) {    # Get object unconditionally
+            $obj = &fetch_obj;
+            print $in, "move $obj to player;\n";
+            next;
+        }
+        if ( $opcode == 0xee ) {    # Give object n1 same owner as object n2
+            $obj  = &fetch_obj;
+            $obj2 = &fetch_obj;
+            print $in, "if (parent($obj) ~= 0) remove $obj;\n";
+            print $in, "else move $obj to parent($obj2);\n";
+            next;
+        }
+        if ( $opcode == 0xef ) {    # No operation
+            next;
+        }
+        if ( $opcode == 0xf0 || $opcode == 0xf1 ) {    # Print room description
+            print $in, "RefreshStatusWindow();\n";
+            next;
+        }
+        if ( $opcode == 0xf2 ) {                       # Increment timer by 1
+            print $in, "timer++;\n";
+            next;
+        }
+        if ( $opcode == 0xf3 ) {                       # Decrement timer by 1
+            print $in, "timer--;\n";
+            next;
+        }
+        if ( $opcode == 0xf4 ) {                       # Display timer
+            print $in, "print timer, \" \";\n";
+            next;
+        }
+        if ( $opcode == 0xf5 ) {                       # Set timer to argument
+            $_ = &fetch;
+            print $in, "timer = $_;\n";
+            next;
+        }
+        if ( $opcode == 0xf6 ) {    # increment timer with argument
+            $_ = &fetch;
+            print $in, "timer = timer + $_;\n";
+            next;
+        }
+        if ( $opcode == 0xf7 ) {    # decrement timer with argument
+            $_ = &fetch;
+            print $in, "timer = timer - $_;\n";
+        }
+
+        if ( $opcode == 0xf8 ) {    # Exchange room with saved room 0
+            print $in, "ExchangeRoom(0);\n";
+            next;
+        }
+        if ( $opcode == 0xf9 ) {   # Exchange room with the specified saved room
+            $number = &fetch;
+            print $in, "ExchangeRoom($number);\n";
+            next;
+        }
+        if ( $opcode == 0xfa ) { # Exchange timer with the specified saved timer
+            $number = &fetch;
+            print $in, "ExchangeTimer($number);\n";
+            next;
+        }
+        if ( $opcode == 0xfb ) {    # display noun string
+            print $in, "PrintNounString(); print \" \";\n";
+            next;
+        }
+        if ( $opcode == 0xfc ) {    # Display noun string
+            print $in, "PrintNounString(); new_line;\n";
+            next;
+        }
+        if ( $opcode == 0xfd ) {    # CR LF
+            print $in, "new_line;\n";
+            next;
+        }
+        if ( $opcode == 0xfe ) {    # Delay (2 seconds)
+            print $in, "Delay();\n";
+            next;
+        }
+        if ( $opcode == 0xff ) {    # Return
+            print $in, "rtrue;\n" unless $implicit;
+            return;
+        }
+    }
+}
+
+sub skip {
+    local ($expr) = @_;
+    local ($lbl);
+
+    if ($label_addr) {
+        $lbl = "clabel_$label2";
+    }
+    else {
+        $lbl = "label_$label";
+    }
+    print ' ' x $indent, "if ($expr) jump $lbl;\n";
+}
+
+sub fetch {
+    local ($value) = ord( substr( $core, $cp++, 1 ) );
+    if ( $debug & $DBG_99_ACTIONS ) {
+        printf( "! %02X \n", $value );
+    }
+    $value;
+}
+
+sub fetch_obj {
+    local ($num) = &fetch;
+    delete $unref_items{$num}
+      if defined $unref_items{$num};    # This item is now longer unreferenced.
+    "item_$num";
+}
+
+sub fetch_room {
+    local ($room) = &fetch;
+    if ( $room == 0xFF ) {
+        return "player";
+    }
+    elsif ( $room == 0 ) {
+        return 0;
+    }
+    else {
+        return "room_" . $room;
+    }
+}
+
+sub fetch_flag {
+    "f" . &fetch;
+}
+
+__END__
+
+!
+! Here starts the code common for all adventures.
+!
+Constant buf_length 80;
+array raw_buffer string buf_length;	! Raw input buffer
+global buffer string buf_length;	! Text buffer
+global parse string 32;			! List of parsed addresses of words
+array verb_str -> buf_length;		! The latest verb entered -- only
+					! used for diagnostic when unknown
+array noun_str -> buf_length;		! The latest noun entered
+global noun;				! Current noun
+global width = 0;			! Screen width
+global height = 0;			! Screen height
+
+!
+! Variables used by various translated actions.
+!
+global auto_inventory = 1;		! Show inventory automatically
+global direction;			! Direction to move in
+global timer;				! Countdown timer
+array room_reg --> 6;			! Room registers
+array timer_reg --> 8;			! Timer registers
+global script_flag = 0;			! Non-zero if transcript is active
+
+!
+! For displaying the upper window.
+!
+global separator -> 256;		! For separator line (<------->)
+constant max_rows 25;			! Max number of lines we are prepared
+					! to handle
+global old_has_light = -1;		! Old value of light
+global old_location = 0;		! Value of location last time
+					!   RefreshStatusWindow was called
+array old_sorted -> 260;		! Old sorted items for current location
+array new_sorted -> 260;		! New sorted items
+array big_buffer -> 2048;		! Buffer used to print text before
+					! outputting it to the status window
+global print_buffer;			! Pointer to the part of big_buffer
+					! we are using now
+array string_ptr --> max_rows;		! Pointer to strings occupying one
+					! screen line each (word 0 is not used)
+array string_len --> max_rows;		! Length of above strings.
+global last_row = 0;			! The last screen row (1 numbering)
+					! and last index used in string_ptr
+					! and string_len
+global window_size = 0;			! The size of the upper window
+
+! The following attributes are used for the object 'flags'.
+attribute f0; attribute f1; attribute f2; attribute f3;
+attribute f4; attribute f5; attribute f6; attribute f7;
+attribute f8; attribute f9; attribute f10; attribute f11;
+attribute f12; attribute f13; attribute f14; attribute f15;
+attribute f16; attribute f17; attribute f18; attribute f19;
+attribute f20; attribute f21; attribute f22; attribute f23;
+attribute f24; attribute f25; attribute f26; attribute f27;
+attribute f28; attribute f29; attribute f30; attribute f31;
+
+attribute treasure;			! Mark all treasure objects.
+
+property n_to; property s_to;
+property e_to; property w_to;
+property u_to; property d_to;
+property description;
+property initial_location;
+property invent_order;
+
+array dir_prop -> n_to s_to e_to w_to u_to d_to;
+array dir_name --> "NORTH" "SOUTH" "EAST" "WEST" "UP" "DOWN";
+array short_dir -> 'n' 's' 'e' 'w' 'u' 'd';
+
+global DontUnderstand = "I don't understand your command. ";
+global CantDoYet = "I can't do that yet. ";
+
+Object player "player";
+
+[ Main;
+  Init();
+  PlayTheGame();
+  quit;
+];
+
+[ Init
+	i;
+  	width = 0->33;
+  	height = 0->32;
+	separator->0 = width-1;
+	separator->1 = '<';
+	for (i = 2: i < width-2: i++) {
+		separator->i = '-';
+	}
+	separator->i = '>';
+];
+
+[ PlayTheGame    i;
+.menu_again;
+	@erase_window -1;
+
+	! Output the title for the adventure centered.
+	@output_stream 3 big_buffer;
+	Title();
+	@output_stream -3;
+  	style reverse;
+	i = (width-big_buffer-->0)/2;
+	spaces(i);
+	Title();
+	spaces(width-i-big_buffer-->0);
+  	style roman;
+
+	! Print a centered menu.
+	for (i = 0: i < (height-10)/2: i++) {
+		new_line;
+	}
+	MenuItem("S", "Start the game");
+	MenuItem("R", "Restore a saved game");
+	MenuItem("C", "Show credits");
+	MenuItem("I", "Info about playing");
+	MenuItem("Q", "Quit");
+
+	! Get a character and perform the function.
+	@read_char 1 i;
+	@erase_window -1;
+	switch (i) {
+	's', 'S': parser();
+	'r', 'R': RestoreAux();
+	'c', 'C': Credits();
+	'i', 'I': Info();
+	'q', 'Q': quit;
+	}
+	jump menu_again;
+];
+
+[ MenuItem key desc;
+	spaces((width-22)/2);
+	style bold;
+	print (string) key;
+	style roman;
+	print "  ", (string) desc;
+	new_line;
+	new_line;
+];
+
+[ RestoreAux   c;
+	restore RMaybe;
+	.RMaybe;
+	print "Restore failed^Press RETURN to continue...";
+	@read_char 1 c;
+];
+
+[ Credits    c;
+  style bold; print "Credits"; style roman;
+  print "^^'";
+  Title();
+  print "' was translated to Inform by Scott2Zip, version ";
+  print (string) #scott2zip_version, ", and subsequently compiled \
+ 	with Inform v";
+  inversion;
+  print ".^^";
+  print "The original version was probably written by either Scott Adams \
+	or Brian Howarth, in the the ~Scott Adams format~. \
+	If written by Scott Adams, it is still under copyright and this \
+	translated version can only be used by the legal owner of the \
+	original adventure; it must not be given away or distributed \
+	on the Net.^^";
+  print "For help to understand the TRS-80 format, \
+        thanks to Paul David Doherty, \
+ 	who wrote the decompiler ScottDec, and to \
+	Alan Cox, who wrote the game driver ScottFree.^^";
+  print "Thanks to Graham Nelson, for creating Inform, and for \
+	 documenting the Z-machine.^^";
+  print "Thanks to Graham Nelson and Gareth Rees, for suggesting how \
+	word-wrapping in the upper window could be done.^^";
+  print "[Please press SPACE.]^";
+  @read_char 1 c;
+];
+
+[ Info c;
+  style bold; print "Commands"; style roman;
+  print "^^Commands consist of sentences with one or two words.
+	The following commands are always understood: HELP, QUIT, \
+	SAVE GAME, SCORE, and INVENTORY.^^";
+  print "In this particular adventure, you may abbreviate any word by typing \
+         its first ", abbreviation, " letters, \
+         and directions by typing one letter.^^";
+  print "There are some meta-commands available.^^~$script~ turns on a game \
+        transcript, ~$unscript~ or ~$noscript~ turns off the transcript. ";
+#ifdef DEBUG;
+  print "^^In addition, for debugging the following commands can be useful: \
+	~$record~ turns on a recording of all commands typed, \
+  	and ~$norecord~ turns it off. ~$replay~ plays back a command \
+	recording. ~$random~ will make the random-number generator \
+	predictable; a number may be given to select a certain sequence \
+	of random numbers.";
+#endif;
+  print "^^";
+  print "[Please press SPACE.]^";
+  @read_char 1 c;
+];
+
+[ YesOrNoChar    c;
+	@read_char 1 c;
+	if (c == 'y' || c == 'Y')
+		rtrue;
+	rfalse;
+];
+
+[ parser
+  	dict verb_word i syntax action num_words c meta;
+  dict = 0-->4;				! Pick up pointer to main dictionary.
+  @output_stream 3 big_buffer;
+  RefreshStatusWindow();
+  @output_stream -3;
+  new_line;
+
+  !
+  ! The main parse loop:
+  !
+  ! 1. Execute the each-turn actions.
+  ! 2. Refresh the status window.
+  ! 3. Print a prompt, read a command and analyse it.
+  ! 4. If the input was error-free, execute the routine for
+  !    entered verb.
+  !
+  while (1 == 1) {
+	.next_turn;
+  	@output_stream 3 big_buffer;
+	EachTurn();
+	flush_buffer();
+
+	!
+	! Jump to here to skip each-turn actions (for meta-verbs).
+	!
+	.again;
+  	@output_stream 3 big_buffer;
+	RefreshStatusWindow();
+	@output_stream -3;
+
+	!
+	! Print the prompt and read a command.
+	! 
+	.prompt;
+	print "WHAT SHALL I DO? ";
+	num_words = ReadCommand();
+	if (num_words == 0) jump prompt;
+	parse->1 = 0;
+	@tokenise buffer parse dict 0;
+        if (parse-->1 == 0) {			! Check if in dictionary
+		! If not in dictionary, might be a direction ('n', 's', etc).
+		if (parse->4 == 1) {		! Must be one letter.
+			c = buffer->(parse->5);
+	    		for (i = 0: i < 6: i++) {
+				if (c == short_dir->i) {
+					@output_stream 3 big_buffer;
+					MovePlayer(dir_prop->i);
+					flush_buffer();
+					jump next_turn;
+				}
+			}
+		}
+		VerbComplain();
+		jump prompt;
+	}
+
+	! Okay, the first word was found in the dictionary, but
+	! must still check if it is a verb.
+	verb_word = parse-->1;
+	if (verb_word->#dict_par1 & 1 == 0) {	! Not a verb.
+		VerbComplain();
+		jump prompt;
+	}
+        meta = (verb_word->#dict_par1) & 2;	! Save the meta bit for later.
+
+! Get the noun, if any.
+	if (num_words < 2) {
+		noun = 0;
+	} else {
+		noun = parse-->3;
+		if ((noun == 0 || (noun->#dict_par1 & $80) == 0) &&
+		    meta == 0) {
+			! Error if noun not in dictionary or noun bit not set,
+			! but if meta-command we accept it anyway.
+			print "I don't know what a ~";
+			PrintNounString();
+			print "~ is.^";
+			jump prompt;
+		}
+	}
+	noun = NounAliases(noun);
+        direction = TestDirections(noun);
+
+! Test if light should run out.
+	if (parent(item_9) ~= 0) {		! Light should be counted down.
+		if (--light_left <= 0) {
+			print "THE LIGHT HAS RUN OUT! ";
+			give flags f16;
+		} else {
+			if (light_left < 24) {
+				print "The light will run out in ",
+					light_left, " turns. ";
+			}
+		}
+	}
+
+!  Now let i be the corresponding verb number, stored in the dictionary entry
+!  (in a peculiar 255-n fashion for traditional Infocom reasons)...
+    	i = $ff-(verb_word->#dict_par2);
+
+!  ...then look up the i-th entry in the verb table, whose address is at word
+!  7 in the Z-machine (in the header), so as to get the address of the syntax
+!  table for the given verb...
+    	syntax = (0-->7)-->i;
+
+! Get the action number from the first verb line (there should only be one),
+! and then get the address of the actual routine to execute.
+	action = syntax->8;
+	action = #actions_table-->action;
+	if (meta ~= 0) {		! Handle meta-verbs.
+		indirect(action);
+		jump again;
+	} else {			! All other verbs.
+		@output_stream 3 big_buffer;
+		indirect(action);
+		flush_buffer();
+	}
+  }
+];
+
+!----------------------------------------------------------------------
+! flush_buffer --
+!	This procedure disables printing into the memory buffer
+!	and displays what has been stored so far.
+!	If some text was stored, an new line will be printed too,
+!	unless no_new_line parameter is true.
+!
+! Results:
+!	None.
+!----------------------------------------------------------------------
+[ flush_buffer
+ 	no_new_line			! INPUT: If non-zero, never print NL.
+	a c;
+	@output_stream -3;
+	if (big_buffer-->0 ~= 0) {
+		a = big_buffer+2;
+		c = big_buffer-->0;
+		@print_table a c 1;
+		if (no_new_line == 0) new_line;
+	}
+];
+
+! ----------------------------------------------------------------------
+! ReadCommand --
+!
+!	This procedure reads a line and converts the first two
+!	words found so that tokenise command can be used.
+!	(Any other word will be ignored.)
+!
+!	The following is done to each word:
+!	a) if the word starts with a '$', it is a meta-command;
+!	   the '$' is stripped and the rest is left as is
+!	   (meta-commands should be at least six-letter words)
+!	b) truncate it to the number of characters given by the
+!	   'abbreviate' variable
+!	c) if the the first character is a digit, the letter
+!	   'd' is prepended
+!	In addition, this procedure will save the first word
+!	in the verb_str buffer and the second in the noun_str
+!	buffer.
+!
+! Results:
+!	The final line is stored in the buffer 'buffer'.
+!	Returns the number of words (0, 1, or 2).
+! ----------------------------------------------------------------------
+[ ReadCommand
+	c			! Character
+	wn			! Word number
+	wbuf			! Buffer to store current word in
+	wbufp			! Pointer into wbuf
+	i			! Pointer to current character
+	linep			! Pointer to resulting line
+	left			! Characters left to copy
+	;
+	
+	raw_buffer->0 = buf_length-2;	! Leave room for terminating zero
+	raw_buffer->1 = 0;
+	@aread raw_buffer 0 c;
+	raw_buffer->(2+raw_buffer->1) = 0; ! Terminate buffer
+	linep = 2;
+	wbuf = verb_str;
+	i = 2;
+	c = raw_buffer->i++;
+	while (wn < 2) {
+		wbufp = 1;
+		while (c == ' ') {	! Skip leading spaces
+			c = raw_buffer->i++;
+		}
+		if (c == 0)
+			break;
+		if ('0' <= c && c <= '9') {
+			buffer->linep++ = 'd';
+		}
+		left = abbreviation;
+		if (c == '$') {			! Meta-command:
+			c = raw_buffer->i++;	!   skip $, 
+			left = 9;		!   no truncation
+		}
+		while (c ~= ' ' && c ~= 0) {	! Loop while not end of word
+			if (left > 0) {
+				buffer->linep++ = c;
+				left--;
+			}
+			wbuf->wbufp++ = c;
+			c = raw_buffer->i++;
+		}
+
+		! Make ready for next word (if any).
+		buffer->linep++ = ' ';		! Store separator
+		wbuf->0 = wbufp-1;		! Store length of complete word
+		if (wbuf == verb_str) {
+			wbuf = noun_str;
+		}
+		wn++;
+	}
+	buffer->1 = linep-2;
+	return wn;
+];
+
+[ VerbComplain    p c;
+	print "I don't know how to ~";
+	p = verb_str+1;
+	c = verb_str->0;
+	@print_table p c 1;
+	print "~.^";
+];
+
+!----------------------------------------------------------------------
+! RefreshStatusWindow --
+! 	This procedure redraws the status window, but only if something
+!	in it has actually changed.
+!
+! Results:
+!	None.
+!----------------------------------------------------------------------
+[ RefreshStatusWindow
+	has_light redraw_needed nw i;
+
+	SortItems(location, new_sorted);	! This must be done anyway.
+	if (location ~= old_location) {
+		redraw_needed = 1;
+		old_location = location;
+	}
+	has_light = HasLight();
+	if (has_light ~= old_has_light) {
+		redraw_needed = 1;
+		old_has_light = has_light
+	}
+
+	!
+	! Check if any change in the list of visible items.
+	!
+	if (old_sorted->0 ~= new_sorted->0) {	! Length of lists differs
+		redraw_needed = 1;
+	} else {
+		! For speed, we will compare words.
+		! The SortItems routines has appended an extra 0 byte to
+		! the end of each array, to make sure that the last word
+		! will also compare okay.
+		nw = (new_sorted->0+2)/2;
+		for (i = 0: i < nw: i++) {
+			if (old_sorted-->i ~= new_sorted-->i) {
+				redraw_needed = 1;
+				break;
+			}
+		}
+	}
+
+	!
+	! Copy new item list to old.
+	!
+	i = new_sorted->0 + 2;
+	@copy_table new_sorted old_sorted i;
+
+	if (redraw_needed ~= 0) {
+		DrawStatusWindow(has_light);
+	}
+];
+
+!----------------------------------------------------------------------
+! DrawStatusWindow --
+! 	This procedure redraws the status window, unconditionally.
+!	Should only be called from RefreshStatusWindow().
+!
+! Results:
+!	None.
+!----------------------------------------------------------------------
+[ DrawStatusWindow
+	has_light		! INPUT: 1 if has light, 0 if darkness
+   i prop num a c;
+   last_row = 0;
+   flush_buffer();
+   print_buffer = big_buffer;
+   print_buffer-->0 = 0;
+   @output_stream 3 print_buffer;
+   if (has_light == 0) {
+	print "It's too dark; I can't see.";
+	jump end_status_line;
+   } else {
+   	print (string) location.description;
+   }
+   word_wrap();
+
+   print "Obvious exit";
+   for (i = 0: i < 6: i++) {
+       prop = dir_prop->i;
+       if (location.prop ~= 0) {
+	   num++;
+       }
+   }
+   if (num ~= 1) {
+     print "s";
+   }
+   print ": ";
+   for (i = 0: i < 6: i++) {
+       prop = dir_prop->i;
+       if (location.prop ~= 0) {
+	   print (string) dir_name-->i;
+	   print " ";
+       }
+   }
+   if (num == 0) {
+       print "NONE";
+   }
+   word_wrap();
+
+! --- Visible items
+   print "Visible items: ";
+   num = new_sorted->0;
+   if (num == 0) {
+	print "None";
+   } else {
+	for (i = 1: i <= num: i++) {
+		if (i > 1) print ", ";
+		print object new_sorted->i;
+	}
+   }
+.end_status_line;
+   word_wrap();
+   @output_stream -3;
+
+   ! Now the new window size is determined.  Split window and print everything.
+   if (window_size ~= 0) {
+	@erase_window 1;
+   }
+   window_size = last_row+1;
+   @split_window window_size;
+   @set_window 1;
+   print_all();
+
+   ! Print separator line.
+   @set_cursor window_size 1;
+   a = separator+1; c = separator->0; @print_table a c 1;
+
+   ! Go back to lower text window.
+   @set_window 0;
+   @buffer_mode 1;
+   @output_stream 3 big_buffer;
+];
+
+[ word_wrap    n startp endp w len;
+   	@output_stream -3;
+	w = width - 1;
+	n = print_buffer-->0;
+	startp = print_buffer + 2;
+	while (w < n) {
+		last_row++;
+		string_ptr-->last_row = startp;
+		endp = startp+w;
+		while (endp->0 ~= ' ') endp--;
+		len = endp-startp;
+		string_len-->last_row = len;
+		n = n - len - 1;
+		startp = endp + 1;
+	}
+	if (n ~= 0) {
+		last_row++;
+		string_ptr-->last_row = startp;
+		string_len-->last_row = n;
+	}
+        print_buffer = print_buffer + print_buffer-->0 + 2;
+	print_buffer-->0 = 0;
+	@output_stream 3 print_buffer;
+];
+
+[ print_all   row p count;
+	for (row = 1: row <= last_row: row++) {
+		@set_cursor row 1;
+		p = string_ptr-->row;
+		count = string_len-->row;
+		@print_table p count 1;
+	}
+	if (script_flag == 0) return;
+	@set_window 0;
+	@output_stream -1;
+	new_line;
+	for (row = 1: row <= last_row: row++) {
+		p = string_ptr-->row;
+		count = string_len-->row;
+		@print_table p count 1;
+		new_line;
+	}
+	@output_stream 1;
+	@set_window 1;
+];
+
+[ SortItems owner buf
+	obj pos n order;
+
+	objectloop (obj in owner) {
+		pos = n+1;
+		order = obj.invent_order;
+		while (pos > 1 && order < (buf->(pos-1)).invent_order) {
+			buf->pos = buf->(pos-1);
+			pos--;
+		}
+		buf->pos = obj;
+		n++;
+	}
+	buf->(n+1) = 0;			! So that we can later compare
+					! words and not bytes.
+	buf->0 = n;
+];
+
+[ PrintInventory
+	num i;
+
+ 	print "I'm carrying: ";
+   	SortItems(player, new_sorted);
+   	num = new_sorted->0;
+   	if (num == 0) {
+		print "Nothing";
+   	} else {
+		for (i = 1: i <= num: i++) {
+			if (i > 1) print ", ";
+			print object new_sorted->i;
+		}
+	}
+	print " ";      
+];
+
+[ ExchangeParents obj1 obj2 p1 p2;
+	p1 = parent(obj1);
+	p2 = parent(obj2);
+	if (p1 == 0) {
+		remove obj2;
+	} else {
+		move obj2 to p1;
+	}
+	if (p2 == 0) {
+		remove obj1;
+	} else {
+		move obj1 to p2;
+	}
+];
+
+[ Pickup item; ! Give player an item, unless he is carrying to much
+    if (children(player) >= max_carried) {
+	print "I'm carrying too much. ";
+    } else {
+    	move item to player;
+    }
+];
+
+[ GetAction    item;
+ 	if (noun == 0) {
+		print "What? ";
+		rfalse;
+	}
+	item = FindItem(location, noun);
+	if (item ~= 0) {
+		Pickup(item);
+	} else {
+		item = FindItem(player, noun);
+		if (item ~= 0) {
+			print "I'm already carrying it! ";
+		} else {
+			print "It's beyond my power to do that. ";
+		}
+	}
+];
+
+[ DropAction    item;
+ 	if (noun == 0) {
+		print "What? ";
+		rfalse;
+	}
+	item = FindItem(player, noun);
+	if (item == 0) {
+		print "I'm not carrying it. ";
+	} else {
+		move item to location;
+	}
+];
+
+[ FindItem owner noun   i;
+	objectloop (i in owner) {
+		if (i.name == noun)
+			return i;
+	}
+	rfalse;
+];
+
+[ MovePlayer dir   newloc light;
+	light = HasLight();
+	newloc = location.dir;
+	if (light == 0) print "It's dangerous to move in the dark. ";
+	if (newloc == 0) {
+		if (light ~= 0) {
+			print "I can't go in that direction. ";
+		} else {
+			print "I fell down and brok my neck! ";
+			give flags ~f15;
+			location = dead_room;
+			EndOfGame();
+		}
+	} else {
+		location = newloc;
+	}
+];
+
+[ HasLight    i;
+	i = parent(item_9);		! Light source
+	if (flags hasnt f15 || i == player or location)
+		rtrue;
+	rfalse;
+];
+
+[ DoSave   result;
+	@save result;
+	switch (result) {
+	0: print "Save failed. ";
+	1: print "OK. ";
+	2: @erase_window -1; old_location = 0;
+	}
+];
+
+[ ExchangeRoom regnum   t;
+	t = room_reg-->regnum;
+	room_reg-->regnum = location;
+	location = t;
+];
+
+[ ExchangeTimer regnum   t;
+	t = timer_reg-->regnum;
+	timer_reg-->regnum = timer;
+	timer = t;
+];
+
+[ PrintNounString   p c;
+	p = noun_str+1;
+	c = noun_str->0;
+	@print_table p c 1;
+];
+
+[ EndOfGame;
+	flush_buffer();
+	print  "This adventure is over. \
+		Do you want to try this adventure again? ";
+	if (YesOrNoChar() ~= 0) {
+		@restart;
+	}
+	quit;
+];
+
+[ PrintScore   num score i;
+	objectloop (i in treasure_room) {
+		if (i has treasure) num++;
+	}
+	score = 200 * num + no_treasures;
+	score = score / no_treasures;
+	score = score / 2;
+	print "I've stored ", num, " treasures. ";
+	print "On a scale from 0 to 100 that rates a ", score, ". ";
+	if (num == no_treasures) {
+		print "Well done.";
+		EndOfGame();
+	}
+];
+
+[ StopDelay   time;
+  time = 0;
+  rtrue;
+];
+
+!
+! Delay for two seconds.
+!
+[ Delay
+   	c;
+	flush_buffer(1);			! Print no new line.
+	@read_char 1 2 #r$StopDelay c;
+	@output_stream 3 big_buffer;
+	rtrue;
+];
+
+#ifdef DEBUG;
+[ ReplaySub;
+	@input_stream 1;
+];
+
+[ RecordOnSub;
+	@output_stream 4;
+];
+
+[ RecordOffSub;
+	@output_stream -4;
+];
+
+[ RandomSub
+	length p value c;
+	if (parse->1 >= 2) {
+		length = parse->8;
+		p = parse->9;
+		if (buffer->p == 'd') {
+			! Remember?  ReadCommand() has inserted a 'd'
+			! before digits!
+			p++;
+			length--;
+		}
+		while (length-- > 0) {
+			c = buffer->p++;
+			if ('0' <= c && c <= '9') {
+				value = value * 10 + c - '0';
+			} else {
+				break;
+			}
+		}
+		if (value <= 0) {
+			value = -1;
+		} else {
+			value = -value;
+		}
+	}
+	value = random(value);
+	"[Random number generator now predictable.]";
+];
+#endif;
+
+[ ScriptOnSub;
+	@output_stream 2;
+	script_flag = 1;
+	print "Start a transcript of ";
+	Title();
+	print ".^";
+	old_location = 0;
+];
+
+[ ScriptOffSub;
+	print "End of transcript.^";
+	@output_stream -2;
+	script_flag = 0;
+];
+
+!
+! Here comes the grammar for the meta-commands.
+!
+! To be sure to avoid clashes with the vocabulary of the translated
+! adventure, meta-commands should be words with at least six letters.
+! (The ordinary words are truncated to at most five characters,
+! meta-commands are not.)
+!
+verb meta "script" * -> ScriptOn;	! Turn on game transcript
+verb meta "noscript" "unscript" * -> ScriptOff;	! Turn off game transcript
+
+#ifdef DEBUG;
+verb meta "replay" * -> Replay;		! Replay command script
+verb meta "record" * -> RecordOn;	! Turn on command recording
+verb meta "norecord" * -> RecordOff;	! Turn off command recording
+verb meta "random" * -> Random;		! Make RNG predictable
+#endif;
+
+!
+! Start of game-specific stuff.
+!
